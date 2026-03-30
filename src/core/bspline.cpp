@@ -3,10 +3,25 @@
 
 #include "fce/bspline.hpp"
 
+#include <stdexcept>
+
 namespace fce {
+
+namespace {
+
+void validate_parametric_coordinates(double v, double w)
+{
+    constexpr double kTol = 1e-12;
+    if (v < -kTol || w < -kTol || v + w > 1.0 + kTol) {
+        throw std::invalid_argument("B-spline coordinates must satisfy v>=0, w>=0, and v+w<=1");
+    }
+}
+
+} // namespace
 
 void BSpline(std::array<double,12>& N, double v, double w)
 {
+    validate_parametric_coordinates(v, w);
     double t1 = 1.0 - v - w;
     double t2 = t1 * t1;
     double t3 = t2 * t2;
@@ -76,6 +91,7 @@ void BSpline(std::array<double,12>& N, double v, double w)
 
 void DBSpline(std::array<std::array<double,2>,12>& DN, double v, double w)
 {
+    validate_parametric_coordinates(v, w);
     double t1  = 1.0 - v - w;
     double t2  = t1 * t1;
     double t3  = t2 * t1;
@@ -145,6 +161,7 @@ void DBSpline(std::array<std::array<double,2>,12>& DN, double v, double w)
 
 void DDBSpline(std::array<std::array<double,3>,12>& DDN, double v, double w)
 {
+    validate_parametric_coordinates(v, w);
     double t1  = 1.0 - v - w;
     double t2  = t1 * v;
     double t3  = 12.0 * t2;

@@ -202,6 +202,35 @@ static int archived_tub_span_per_element(const DataDat& d)
     return 47;
 }
 
+static void validate_chirality_input(const DataDat& d)
+{
+    if (d.nchir != 0 && d.nchir != 1) {
+        throw std::runtime_error("Invalid data.dat chirality flag: nchir must be 0 or 1");
+    }
+    if (d.nchir == 1) {
+        return;
+    }
+
+    if (d.xn1.empty() || d.xn2.empty()) {
+        throw std::runtime_error("Invalid data.dat chirality indices: missing xn1/xn2 values");
+    }
+
+    constexpr double kTol = 1e-12;
+    for (int i = 0; i < d.nsheets; ++i) {
+        const double xn1 = d.xn1[i];
+        const double xn2 = d.xn2[i];
+        if (xn1 < 0.0 || xn2 < 0.0) {
+            throw std::runtime_error("Invalid data.dat chirality indices: xn1 and xn2 must be nonnegative");
+        }
+        if (std::abs(xn1) < kTol && std::abs(xn2) < kTol) {
+            throw std::runtime_error("Invalid data.dat chirality indices: xn1 and xn2 cannot both be zero");
+        }
+        if (std::abs(2.0 * xn1 + xn2) < kTol) {
+            throw std::runtime_error("Invalid data.dat chirality indices: 2*xn1 + xn2 must be nonzero");
+        }
+    }
+}
+
 // ─── Main pipeline ────────────────────────────────────────────────────────────
 
 void run_preprocessor(const std::string& work_dir)
@@ -210,6 +239,7 @@ void run_preprocessor(const std::string& work_dir)
     std::cout << "FCE Preprocessor: reading " << sep << "data.dat\n";
 
     DataDat d = read_data_dat(sep + "data.dat");
+    validate_chirality_input(d);
 
     const double PI = std::acos(-1.0);
 

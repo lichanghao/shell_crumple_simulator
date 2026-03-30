@@ -97,3 +97,22 @@ TEST(BSpline, AnalyticalDerivativesMatchFiniteDifferences)
         EXPECT_NEAR(second[i][2], fd_dvw, 1e-4) << "shape " << i << " dvdw";
     }
 }
+
+TEST(BSpline, OutOfDomainCoordinatesAreRejected)
+{
+    std::array<double, 12> shape{};
+    std::array<std::array<double, 2>, 12> first{};
+    std::array<std::array<double, 3>, 12> second{};
+
+    EXPECT_THROW(fce::BSpline(shape, -1e-6, 0.2), std::invalid_argument);
+    EXPECT_THROW(fce::BSpline(shape, 0.2, -1e-6), std::invalid_argument);
+    EXPECT_THROW(fce::BSpline(shape, 0.6, 0.5), std::invalid_argument);
+
+    EXPECT_THROW(fce::DBSpline(first, -1e-6, 0.2), std::invalid_argument);
+    EXPECT_THROW(fce::DBSpline(first, 0.2, -1e-6), std::invalid_argument);
+    EXPECT_THROW(fce::DBSpline(first, 0.6, 0.5), std::invalid_argument);
+
+    EXPECT_THROW(fce::DDBSpline(second, -1e-6, 0.2), std::invalid_argument);
+    EXPECT_THROW(fce::DDBSpline(second, 0.2, -1e-6), std::invalid_argument);
+    EXPECT_THROW(fce::DDBSpline(second, 0.6, 0.5), std::invalid_argument);
+}
