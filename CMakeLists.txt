@@ -37,8 +37,15 @@ FetchContent_MakeAvailable(googletest)
 # Core library (shared by prepro and simulator)
 # ──────────────────────────────────────────────────────────────────────────────
 add_library(fce_core
+  src/core/bspline.cpp
+  src/core/ghost_nodes.cpp
   src/core/io.cpp
+  src/core/load_pre.cpp
+  src/core/mesh_generator.cpp
   src/core/mpi_env.cpp
+  src/core/preprocessor.cpp
+  src/core/quadrature.cpp
+  src/core/reference_config.cpp
 )
 target_include_directories(fce_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
@@ -70,8 +77,11 @@ target_link_libraries(crunch_it PRIVATE fce_core)
 enable_testing()
 
 add_executable(unit_tests
+  test/unit/test_bspline.cpp
+  test/unit/test_ghost_nodes.cpp
   test/unit/test_io.cpp
   test/unit/test_mpi_env.cpp
+  test/unit/test_reference_config.cpp
 )
 target_link_libraries(unit_tests PRIVATE
   fce_core
@@ -81,11 +91,16 @@ include(GoogleTest)
 gtest_discover_tests(unit_tests)
 
 add_executable(integration_tests
+  test/support/oracle_compare.cpp
   test/integration/test_oracle_roundtrip.cpp
+  test/integration/test_prepro_oracle.cpp
 )
 target_link_libraries(integration_tests PRIVATE
   fce_core
   GTest::gtest_main
+)
+target_include_directories(integration_tests PRIVATE
+  ${CMAKE_SOURCE_DIR}/test/support
 )
 gtest_discover_tests(integration_tests)
 

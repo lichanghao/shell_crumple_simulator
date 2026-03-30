@@ -1,12 +1,18 @@
-// Preprocessor entry point (stub — implementation in Milestone 2)
-#include "fce/mpi_env.hpp"
+// Preprocessor entry point.
+#include "fce/preprocessor.hpp"
 #include <iostream>
+#include <stdexcept>
 
-int main(int argc, char** argv) {
-    fce::MpiEnv mpi(argc, argv);
-    if (mpi.is_root()) {
-        std::cout << "FCE Preprocessor (C++17) — stub\n";
-        std::cout << "MPI ranks: " << mpi.size() << "\n";
+int main(int argc, char** argv)
+{
+    std::string work_dir = ".";
+    if (argc >= 2) work_dir = argv[1];
+
+    try {
+        fce::run_preprocessor(work_dir);
+    } catch (const std::exception& e) {
+        std::cerr << "ERROR: " << e.what() << "\n";
+        return 1;
     }
     return 0;
 }
