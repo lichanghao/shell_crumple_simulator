@@ -99,3 +99,13 @@ Solution: Match the widened-single twist constant exactly, preserve the Fortran 
 Constraints: This is an archive-compatibility rule for the preprocessor’s bilayer local-density branch (`nCodeLoad=1000`). It does not imply the broader runtime vdW implementation should depend on allocator quirks; it only preserves the committed canonical oracle.
 Validation Evidence: `PreprocessorOracle.ArchivedBilayerTwistVdw1000PreproInputMatchesOracleOutputs` and `PreprocessorOracle.BilayerTwistVdw1000ForcesNborderOverrideToTwo` pass; full `ctest --test-dir build --output-on-failure` passes 42/42.
 Source Rounds: 10
+
+## Lesson: brenner-hessian-fixture-is-finite-difference
+Lesson ID: BL-20260330-brenner-hessian-fixture-fd
+Scope: test/cases/constitutive_oracle, test/unit/test_constitutive.cpp, Brenner kernel parity
+Problem Description: The new Brenner kernel parity test initially failed even after the analytical C++ Hessian matched centered finite differences, because the committed Fortran fixture’s Hessian rows differed from the analytical result by about `1e-6` on `O(1e2)` entries.
+Root Cause: The frozen Fortran helper cannot emit the internal `ddW/dpe²` tensor directly, so the committed fixture stores Hessian rows reconstructed by centered finite differences of the Fortran `dW/dpe` output. That fixture therefore contains truncation and roundoff noise and is not an exact analytical oracle.
+Solution: Keep the fixture-backed Brenner Hessian comparison at a tolerance consistent with a finite-difference oracle, and pair it with a separate C++ analytical-vs-finite-difference test so exact second-derivative consistency is still enforced.
+Constraints: This lesson applies only when the oracle artifact is itself finite-difference-derived. If a future helper exposes exact Fortran Hessian terms, restore tighter direct parity tolerances.
+Validation Evidence: `Brenner.MatchesCommittedFortranOracleFixtures` and `Brenner.HessianMatchesFiniteDifference` both pass; full `ctest --test-dir build --output-on-failure` passes 46/46.
+Source Rounds: 11

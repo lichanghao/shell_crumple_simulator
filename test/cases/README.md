@@ -54,6 +54,15 @@ Committed Fortran oracle fixtures for `BSpline`, `DBSpline`, and `DDBSpline`.
 - Reproduction helper: `tools/dump_bspline_oracle.f90`
 - Source of truth: `../finite_crystal_elasticity/grapheneCompressionOriginPrePro/BSpline.f90`
 
+### constitutive_oracle/
+Committed Fortran oracle fixtures for the Brenner constitutive kernel and inner Newton relaxation.
+- Fixtures: `brenner/case_01.dat` … `brenner/case_10.dat`,
+  `newton_inner/case_01.dat` … `newton_inner/case_04.dat`
+- Reproduction helper: `tools/dump_constitutive_oracle.f90`
+- Source of truth: `../finite_crystal_elasticity/grapheneCompressionOriginVersion/brenner.f90`,
+  `../finite_crystal_elasticity/grapheneCompressionOriginVersion/Hyper_pot_inner_alg.f90`,
+  `../finite_crystal_elasticity/grapheneCompressionOriginVersion/newton_inner.f90`
+
 ## nCodeLoad Reference
 
 The standard graphene compression case uses **nCodeLoad=3** (not nCodeLoad=1 as originally
