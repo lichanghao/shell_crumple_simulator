@@ -1,0 +1,98 @@
+cmake_minimum_required(VERSION 3.18)
+project(FiniteCrystalElasticity VERSION 0.1.0 LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Build type default
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+# Compiler warnings
+add_compile_options(-Wall -Wextra -Wpedantic)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dependencies
+# ──────────────────────────────────────────────────────────────────────────────
+
+# MPI
+find_package(MPI REQUIRED)
+
+# Eigen3
+find_package(Eigen3 REQUIRED NO_MODULE)
+
+# GoogleTest
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG        v1.14.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Core library (shared by prepro and simulator)
+# ──────────────────────────────────────────────────────────────────────────────
+add_library(fce_core
+  src/core/io.cpp
+  src/core/mpi_env.cpp
+)
+target_include_directories(fce_core PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
+)
+target_link_libraries(fce_core PUBLIC
+  MPI::MPI_CXX
+  Eigen3::Eigen
+)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Preprocessor executable
+# ──────────────────────────────────────────────────────────────────────────────
+add_executable(PrePro
+  src/prepro/main.cpp
+)
+target_link_libraries(PrePro PRIVATE fce_core)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Simulator executable
+# ──────────────────────────────────────────────────────────────────────────────
+add_executable(crunch_it
+  src/simulator/main.cpp
+)
+target_link_libraries(crunch_it PRIVATE fce_core)
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Tests
+# ──────────────────────────────────────────────────────────────────────────────
+enable_testing()
+
+add_executable(unit_tests
+  test/unit/test_io.cpp
+  test/unit/test_mpi_env.cpp
+)
+target_link_libraries(unit_tests PRIVATE
+  fce_core
+  GTest::gtest_main
+)
+include(GoogleTest)
+gtest_discover_tests(unit_tests)
+
+add_executable(integration_tests
+  test/integration/test_oracle_roundtrip.cpp
+)
+target_link_libraries(integration_tests PRIVATE
+  fce_core
+  GTest::gtest_main
+)
+gtest_discover_tests(integration_tests)
+
+# Pass oracle path to tests
+target_compile_definitions(integration_tests PRIVATE
+  ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
+)
+target_compile_definitions(unit_tests PRIVATE
+  ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
+)

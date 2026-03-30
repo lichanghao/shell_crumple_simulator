@@ -18,12 +18,14 @@ Preprocessor reference outputs for the standard graphene compression case.
   `nano_Mesh.dat`, `nano_tub_loc.dat`, `nano_zero.dat`, `meshini.msh`
 - Build log: `prepro.log`
 
-### graphene_compression_simulator/
-Simulator reference outputs for the standard graphene compression case (serial, np=1).
-- Input: nano_*.dat files from graphene_compression_prepro/
-- Oracle outputs: `energy.dat` (53 lines = header + 2 init + 50 steps), `force.dat`,
-  `nano_final_config.dat`, `output.dat`
-- Build/run log: `simulator.log`
+### graphene_compression_simulator/np1/
+Simulator reference outputs for the standard graphene compression case — serial run (np=1).
+- Input: nano_*.dat files from graphene_compression_prepro/; run command: `mpirun -np 1 crunch_it`
+- Confirmed single-rank: `simulator.log` line 1: "Numero de procesadores: 1"
+- Oracle outputs: `energy.dat`, `force.dat`, `nano_final_config.dat`, `output.dat`,
+  `simulator.log`, `mesh_config_0000.vtu` … `mesh_config_0050.vtu` (51 VTU snapshots),
+  `mesh_config_series.pvd`
+- Final energy: 1.3427137479171509E-003 (load step 50, IFLAG=0)
 
 ### graphene_cyclic_crumple/
 Preprocessor and simulator reference outputs for the cyclic crumpling case.
