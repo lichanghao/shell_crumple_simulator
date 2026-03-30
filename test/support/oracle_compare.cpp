@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 
@@ -55,6 +56,35 @@ FlatCoords flatten_coords(const io::ConfigData& config)
         flat.push_back(xyz[0]);
         flat.push_back(xyz[1]);
         flat.push_back(xyz[2]);
+    }
+    return flat;
+}
+
+FlatCoords read_ghost_coords_file(const std::string& path, int nedge)
+{
+    std::ifstream in(path);
+    if (!in.is_open()) {
+        throw std::runtime_error("Failed to open ghost coordinate file: " + path);
+    }
+
+    FlatCoords flat;
+    flat.reserve(nedge * 3);
+
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        std::string sx, sy, sz;
+        if (!(row >> sx >> sy >> sz)) {
+            throw std::runtime_error("ghost_coords.dat: row is missing coordinates");
+        }
+        flat.push_back(io::parse_fortran_double(sx));
+        flat.push_back(io::parse_fortran_double(sy));
+        flat.push_back(io::parse_fortran_double(sz));
+    }
+
+    if (static_cast<int>(flat.size()) != nedge * 3) {
+        throw std::runtime_error("ghost_coords.dat: expected " + std::to_string(nedge) +
+                                 " rows, got " + std::to_string(flat.size() / 3));
     }
     return flat;
 }
@@ -251,18 +281,32 @@ void expect_close(MismatchCollector& mismatches,
         }
     }
 
-    auto actual_with_ghosts = flatten_coords(actual_config);
-    auto oracle_with_ghosts = flatten_coords(oracle_config);
-    ghost_nodes(actual_mesh, actual_with_ghosts);
-    ghost_nodes(oracle_mesh, oracle_with_ghosts);
+    FlatCoords actual_ghost_coords;
+    const auto actual_ghost_path = join(actual_dir, "ghost_coords.dat");
+    if (std::filesystem::exists(actual_ghost_path)) {
+        actual_ghost_coords = read_ghost_coords_file(actual_ghost_path, actual_mesh.nedge);
+    } else {
+        auto actual_with_ghosts = flatten_coords(actual_config);
+        ghost_nodes(actual_mesh, actual_with_ghosts);
+        actual_ghost_coords.assign(actual_with_ghosts.begin() + actual_mesh.numnods * 3,
+                                   actual_with_ghosts.end());
+    }
+
+    const auto oracle_ghost_path = join(oracle_dir, "ghost_coords.dat");
+    if (!std::filesystem::exists(oracle_ghost_path)) {
+        mismatches.add("ghost_coords.dat missing from oracle dir: " + oracle_ghost_path);
+        return ::testing::AssertionFailure() << mismatches.str();
+    }
+    const auto oracle_ghost_coords = read_ghost_coords_file(oracle_ghost_path, oracle_mesh.nedge);
+
     for (int edge = 0; edge < oracle_mesh.nedge && edge < actual_mesh.nedge; ++edge) {
-        const int actual_base = (actual_mesh.numnods + edge) * 3;
-        const int oracle_base = (oracle_mesh.numnods + edge) * 3;
+        const int actual_base = edge * 3;
+        const int oracle_base = edge * 3;
         for (int dim = 0; dim < 3; ++dim) {
             expect_close(mismatches,
                          "ghost_coords[" + std::to_string(edge) + "][" + std::to_string(dim) + "]",
-                         actual_with_ghosts[actual_base + dim],
-                         oracle_with_ghosts[oracle_base + dim],
+                         actual_ghost_coords[actual_base + dim],
+                         oracle_ghost_coords[oracle_base + dim],
                          float_abs_tol);
         }
     }

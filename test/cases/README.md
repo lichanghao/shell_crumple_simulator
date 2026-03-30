@@ -15,7 +15,7 @@ These directories contain archived reference outputs from the canonical Fortran 
 Preprocessor reference outputs for the standard graphene compression case.
 - Input: `data.dat` — 40×40 mesh, 20nm×20nm, nCodeLoad=3 (compression), nloadstep=50
 - Oracle outputs: `nano_BCs.dat`, `nano_config.dat`, `nano_dims.dat`, `nano_general.dat`,
-  `nano_Mesh.dat`, `nano_tub_loc.dat`, `nano_zero.dat`, `meshini.msh`
+  `nano_Mesh.dat`, `nano_tub_loc.dat`, `nano_zero.dat`, `ghost_coords.dat`, `meshini.msh`
 - Build log: `prepro.log`
 
 ### graphene_compression_simulator/np1/
@@ -31,6 +31,7 @@ Simulator reference outputs for the standard graphene compression case — seria
 Preprocessor and simulator reference outputs for the cyclic crumpling case.
 - Input: `prepro_run/data.dat` — 40×40 mesh, 20nm×20nm, nCodeLoad=31 (biaxial cyclic),
   5 cycles, nloadstep_comp=20, nloadstep_rel=20, ncrease=1
+- Preprocessor outputs: `prepro_run/nano_*.dat`, `prepro_run/ghost_coords.dat`, `prepro_run/prepro.log`
 - Simulator outputs: `energy.dat`, `force.dat`, `crease_map.dat`, `nano_final_config.dat`,
   `output.dat`, `nano_checkpoint.dat`
 

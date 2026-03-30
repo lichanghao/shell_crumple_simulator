@@ -43,6 +43,24 @@ echo "1" | ./PrePro
 ```
 (The `echo "1"` selects the mesh type interactively; `1` = flat sheet.)
 
+### Archived Ghost Coordinates
+
+The committed `ghost_coords.dat` oracle artifact was generated from the same frozen Fortran source,
+using the canonical `ghost_nodes` subroutine in `grapheneCompressionOriginPrePro/connect_mesh.f90`
+applied to the archived `nano_Mesh.dat` + `nano_config.dat` inputs.
+
+Generation flow:
+```bash
+gfortran -c -O0 -fallow-argument-mismatch grapheneCompressionOriginPrePro/headers.f90
+gfortran -c -O0 -fallow-argument-mismatch grapheneCompressionOriginPrePro/connect_mesh.f90
+gfortran -O0 -fallow-argument-mismatch dump_ghost_coords.f90 headers.o connect_mesh.o -o dump_ghost_coords
+./dump_ghost_coords <case-dir>
+```
+
+The helper writes one `x y z` triplet per ghost node in oracle order. The same procedure was used
+for both `test/cases/graphene_compression_prepro/ghost_coords.dat` and
+`test/cases/graphene_cyclic_crumple/prepro_run/ghost_coords.dat`.
+
 ## Simulator Build
 
 Source directory: `finite_crystal_elasticity/grapheneCompressionOriginVersion/`

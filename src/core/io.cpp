@@ -430,6 +430,7 @@ void write_bcs(const std::string& path, const BCData& bc) {
 Mesh read_mesh(const std::string& path, int ngauss) {
     (void)ngauss;
     Mesh m;
+    int max_vertex = -1;
     std::ifstream f(path);
     if (!f) throw std::runtime_error("Cannot open: " + path);
     std::string line;
@@ -454,6 +455,7 @@ Mesh read_mesh(const std::string& path, int ngauss) {
         el.vertices[0] = std::stoi(toks[1]) - 1;
         el.vertices[1] = std::stoi(toks[2]) - 1;
         el.vertices[2] = std::stoi(toks[3]) - 1;}
+        max_vertex = std::max({max_vertex, el.vertices[0], el.vertices[1], el.vertices[2]});
         // num_neigh_elem
         std::getline(f, line); el.num_neigh_elem = std::stoi(line);
         // num_neigh_vert
@@ -476,6 +478,7 @@ Mesh read_mesh(const std::string& path, int ngauss) {
         m.connect.push_back(el);
     }
     m.numele = static_cast<int>(m.connect.size());
+    m.numnods = max_vertex + 1;
 
     // nghost_tab: nedge rows of 3 integers (1-based node indices → 0-based)
     while (std::getline(f, line)) {

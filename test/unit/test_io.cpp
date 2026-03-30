@@ -98,6 +98,12 @@ TEST(ReadConfig, GrapheneCompression) {
     EXPECT_NEAR(c.coords[0][2], 0.0, 1e-15);
     // Second node: (0.5, 0, 0) — mesh spacing = 20nm/40 = 0.5nm
     EXPECT_NEAR(c.coords[1][0], 0.5, 1e-12);
+    EXPECT_NEAR(c.coords[1][1], 0.0, 1e-15);
+    // Boundary between the first and second nodal rows must be parsed after the file headers.
+    EXPECT_NEAR(c.coords[40][0], 20.0, 1e-12);
+    EXPECT_NEAR(c.coords[40][1], 0.0, 1e-15);
+    EXPECT_NEAR(c.coords[41][0], 0.0, 1e-15);
+    EXPECT_NEAR(c.coords[41][1], 0.5, 1e-12);
     // All η initially zero
     EXPECT_NEAR(c.eta[0][0][0], 0.0, 1e-15);
     EXPECT_NEAR(c.eta[0][0][1], 0.0, 1e-15);
@@ -129,6 +135,7 @@ TEST(ReadBCs, GrapheneCompression) {
 TEST(ReadMesh, GrapheneCompression) {
     auto m = fce::io::read_mesh(kPrepro + "nano_Mesh.dat", 2);
     EXPECT_EQ(m.numele, 3200);
+    EXPECT_EQ(m.numnods, 1681);
     EXPECT_EQ(m.nedge,   166);
     EXPECT_EQ(m.nelem_ghost, 0);
     EXPECT_EQ(m.nnode_ghost, 0);
