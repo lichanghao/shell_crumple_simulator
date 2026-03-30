@@ -89,3 +89,13 @@ Solution: Mirror the exact Fortran read order before deriving behavior from `dat
 Constraints: Applies to preprocessor-side `data.dat` parsing. Future `nvdw=1` work still needs the remaining multi-sheet/twist branches, but the optional-block ordering must stay exact across all of them.
 Validation Evidence: `PreprocessorOracle.ArchivedSelfContactPreproInputMatchesOracleOutputs` passes against `test/cases/graphene_self_contact/prepro_run`; `ReadDims.GrapheneSelfContact`, `ReadVdw.GrapheneSelfContact`, `RoundTrip.DimsSelfContact`, and `RoundTrip.Vdw` pass; full `ctest --test-dir build --output-on-failure` passes 40/40.
 Source Rounds: 9
+
+## Lesson: bilayer-twist-density-needs-fortran-buffer-compatibility
+Lesson ID: BL-20260330-bilayer-twist-density-buffer
+Scope: src/core/preprocessor.cpp, src/core/vdw_preprocessor.cpp, code 1000 bilayer twist preprocessor parity
+Problem Description: The archived `graphene_bilayer_twist_vdw_1000` oracle still diverged after the obvious twist-path ports were in place: second-sheet `nano_zero.dat`, `nano_Mesh.dat`, and especially `nano_vdw.dat` mismatched even though the geometry, BCs, and vdW parser looked structurally correct.
+Root Cause: The Fortran code-1000 path depends on several compatibility details that are easy to miss when reading the source at a high level: `PI = 3.1415926` is a default-real literal widened to `REAL(8)`, the auxiliary ghost mesh uses `xlength/ncol*(ncol+1)` and `ylength/ncol*(nrow+1)` rather than the naively expected `(n+2)` span, `compute_atomic_density` consumes the pre-ghost-node `x0` buffer directly, and on sheet 2 the archived oracle effectively reads the `xg(numno+1 : numno+numed)` slice into that tail before writing `nano_vdw.dat`.
+Solution: Match the widened-single twist constant exactly, preserve the Fortran ordering around the `nborder` override, generate the auxiliary mesh with the exact `(n+1)` span formulas, avoid a second C++ `ghost_nodes()` pass inside the atomic-density preprocessor path, and seed the sheet-2 code-1000 density buffer from the matching `xg` slice before calling the density routine.
+Constraints: This is an archive-compatibility rule for the preprocessor’s bilayer local-density branch (`nCodeLoad=1000`). It does not imply the broader runtime vdW implementation should depend on allocator quirks; it only preserves the committed canonical oracle.
+Validation Evidence: `PreprocessorOracle.ArchivedBilayerTwistVdw1000PreproInputMatchesOracleOutputs` and `PreprocessorOracle.BilayerTwistVdw1000ForcesNborderOverrideToTwo` pass; full `ctest --test-dir build --output-on-failure` passes 42/42.
+Source Rounds: 10

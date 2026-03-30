@@ -23,7 +23,6 @@ void compute_gauss_positions(VdwData& vdw, const Mesh& mesh, const FlatCoords& c
 {
     FlatCoords coords_with_ghosts = coords;
     coords_with_ghosts.resize(3 * (mesh.numnods + mesh.nedge), 0.0);
-    ghost_nodes(mesh, coords_with_ghosts);
 
     vdw.x.assign(vdw.ng_tot, Vec3{0.0, 0.0, 0.0});
     for (int ielem = 0; ielem < mesh.numele; ++ielem) {

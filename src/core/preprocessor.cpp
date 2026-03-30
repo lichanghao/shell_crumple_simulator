@@ -249,6 +249,25 @@ static void validate_chirality_input(const DataDat& d)
     }
 }
 
+static void rotate_sheet_geometry(FlatCoords& coords,
+                                  double xc0,
+                                  double yc0,
+                                  double twist_angle_radians,
+                                  double z_shift)
+{
+    const double c = std::cos(twist_angle_radians);
+    const double s = std::sin(twist_angle_radians);
+    const int num_nodes = static_cast<int>(coords.size() / 3);
+    for (int inode = 0; inode < num_nodes; ++inode) {
+        const int base = 3 * inode;
+        const double x_old = coords[base + 0];
+        const double y_old = coords[base + 1];
+        coords[base + 0] = (x_old - xc0) * c - (y_old - yc0) * s + xc0;
+        coords[base + 1] = (x_old - xc0) * s + (y_old - yc0) * c + yc0;
+        coords[base + 2] += z_shift;
+    }
+}
+
 // ─── Main pipeline ────────────────────────────────────────────────────────────
 
 void run_preprocessor(const std::string& work_dir)
@@ -260,6 +279,9 @@ void run_preprocessor(const std::string& work_dir)
     validate_chirality_input(d);
 
     const double PI = std::acos(-1.0);
+    // Match Fortran `REAL(8), PARAMETER :: PI = 3.1415926`, where the
+    // default-real literal is rounded to single precision before widening.
+    constexpr double kTwistPi = static_cast<double>(3.1415926f);
 
     // ── Material: bond vectors and s0 ──────────────────────────────────────────
     double theta;
@@ -293,11 +315,16 @@ void run_preprocessor(const std::string& work_dir)
     }
 
     // ── Handle nborder adjustment and xlength scaling ─────────────────────────
-    int nborder = d.nborder;
+    const int parsed_nborder = d.nborder;
     double xlength_orig = d.xlength;
     // Fortran: xlength = xlength*(ncol+2*nborder)/ncol (for all sheets)
     // Here nsheets=1, ncol=d.ncol[0]
-    double xlength_scaled = xlength_orig * (d.ncol[0] + 2 * nborder) / static_cast<double>(d.ncol[0]);
+    double xlength_scaled =
+        xlength_orig * (d.ncol[0] + 2 * parsed_nborder) / static_cast<double>(d.ncol[0]);
+    int nborder = parsed_nborder;
+    if ((d.nCodeLoad == 222 || d.nCodeLoad == 1000) && nborder < 2) {
+        nborder = 2;
+    }
 
     // Expand nrow, ncol by nborder
     std::vector<int> nrow_eff(d.nsheets), ncol_eff(d.nsheets);
@@ -380,6 +407,10 @@ void run_preprocessor(const std::string& work_dir)
         Mesh mesh0;
         FlatCoords x0;
         mesh_gen_square(nrow, ncol, xl, yl, x0, mesh0);
+        x0.resize(3 * (numno + numed), 0.0);
+        if ((d.nCodeLoad == 222 || d.nCodeLoad == 333 || d.nCodeLoad == 1000) && imesh == 1) {
+            rotate_sheet_geometry(x0, xl / 2.0, yl / 2.0, d.angle * kTwistPi / 180.0, d.angle2);
+        }
 
         // ── Compute F0, J0 ────────────────────────────────────────────────────
         auto rc = compute_ref_config(mesh0, x0);
@@ -417,43 +448,36 @@ void run_preprocessor(const std::string& work_dir)
         // ── Ghost mesh connectivity ───────────────────────────────────────────
         int nrowg = nrow + 2;
         int ncolg = ncol + 2;
-        double xlg = xl / ncol * (ncol + 1);  // wait - Fortran: xlengthg = xlength/ncol*(ncol+1)
-        // But actually Fortran uses xlength[imesh]/ncol[imesh]*(ncol[imesh]+1)
-        // Here ncol = ncol_eff[imesh], xl = xlength_scaled
-        // But the ghost mesh should use the same per-cell spacing, extended by 1 on each side
-        // xlengthg = xl * (ncolg) / ncol = xl + xl/ncol (= xl*(1+1/ncol))
-        // Wait Fortran: xlengthg = xlength(imesh)/ncol(imesh)*(ncolg)
-        // ncolg = ncol+2, so xlengthg = xl/ncol*(ncol+2)
-        // But the Fortran ncolg = ncol(imesh)+2 and nrowg = nrow(imesh)+2
-        // where these are already the expanded (with nborder) values
-        xlg = xl / ncol * ncolg;
-        double ylg = yl / nrow * (nrow + 2); // Fortran: ylengthg = ylength/ncol*(nrow+1)?
-        // Actually Fortran: ylengthg = ylength(imesh)/ncol(imesh)*(nrow(imesh)+1)
-        // That would be: ylg = yl / ncol * (nrow + 1)
-        // Wait, re-reading: ylengthg = ylength(imesh)/ncol(imesh)*(nrow(imesh)+1)
-        // This mixes ncol and nrow. Let me use ncol for both (since step sizes are equal
-        // for a square mesh xl/ncol = yl/nrow)
-        ylg = yl / nrow * (nrow + 2); // nrowg = nrow+2
+        const double xlg = xl / ncol * (ncol + 1);
+        const double ylg = yl / ncol * (nrow + 1);
 
         Mesh meshg;
         FlatCoords xg;
         meshg_gen_square(nrowg, ncolg, xlg, ylg, xg, meshg);
+        if ((d.nCodeLoad == 222 || d.nCodeLoad == 333 || d.nCodeLoad == 1000) && imesh == 1) {
+            rotate_sheet_geometry(xg, xl / 2.0, yl / 2.0, d.angle * kTwistPi / 180.0, d.angle2);
+        }
 
         connect_mesh(meshg);
         connect_orig_mesh(mesh0, meshg, ncol, nrow);
 
-        // ── Ghost node positions ──────────────────────────────────────────────
-        // x0 currently has real nodes only; extend for ghost nodes
-        x0.resize(3 * (numno + numed), 0.0);
-        ghost_nodes(mesh0, x0);
-
         if (d.nvdw == 1) {
             VdwData sheet_vdw = vdwT;
             const double twist_angle_radians =
-                (d.nCodeLoad == 1000 && imesh == 1) ? d.angle * PI / 180.0 : 0.0;
+                (d.nCodeLoad == 1000 && imesh == 1) ? d.angle * kTwistPi / 180.0 : 0.0;
+            FlatCoords x0_vdw = x0;
+            if (d.nCodeLoad == 1000 && imesh == 1) {
+                for (int ighost = 0; ighost < numed; ++ighost) {
+                    const int src = 3 * (numno + ighost);
+                    const int dst = 3 * (numno + ighost);
+                    x0_vdw[dst + 0] = xg[src + 0];
+                    x0_vdw[dst + 1] = xg[src + 1];
+                    x0_vdw[dst + 2] = xg[src + 2];
+                }
+            }
             initialize_preprocessor_vdw(sheet_vdw,
                                         mesh0,
-                                        x0,
+                                        x0_vdw,
                                         mat,
                                         xl,
                                         yl,
@@ -571,9 +595,10 @@ void run_preprocessor(const std::string& work_dir)
                 } else if (nv >= 0) {
                     meshT.connect[ielT].neigh_vert[k] = nv + nodT_acc;
                 }
-                // neigh_elem: 1-based element indices, shift by nelT_acc
-                if (meshT.connect[ielT].neigh_elem[k] != 0)
-                    meshT.connect[ielT].neigh_elem[k] += nelT_acc;
+                // Match the Fortran total-mesh merge exactly: neigh_elem stores
+                // 1-based sheet-local indices, and the sheet offset is added
+                // unconditionally, even when the local entry is zero.
+                meshT.connect[ielT].neigh_elem[k] += nelT_acc;
             }
             // vertices
             for (int k = 0; k < 3; ++k)

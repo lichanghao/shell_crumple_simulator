@@ -391,17 +391,27 @@ BCData read_bcs(const std::string& path) {
     skip_to_label("BCs%value");
     bc.value = parse_fortran_double(next_trimmed());
 
-    // Cyclic params (always present)
-    skip_to_label("BCs%ncycles");
-    bc.ncycles = std::stoi(next_trimmed());
-    skip_to_label("BCs%nloadstep_comp");
-    bc.nloadstep_comp = std::stoi(next_trimmed());
-    skip_to_label("BCs%nloadstep_rel");
-    bc.nloadstep_rel = std::stoi(next_trimmed());
-    skip_to_label("BCs%value_comp");
-    bc.value_comp = parse_fortran_double(next_trimmed());
-    skip_to_label("BCs%value_rel");
-    bc.value_rel = parse_fortran_double(next_trimmed());
+    // Cyclic params are present in the archived compression/cyclic files written
+    // by the newer preprocessor path, but older non-cyclic Fortran archives stop
+    // after BCs%value. Default to the non-cyclic equivalents when the tail is absent.
+    try {
+        skip_to_label("BCs%ncycles");
+        bc.ncycles = std::stoi(next_trimmed());
+        skip_to_label("BCs%nloadstep_comp");
+        bc.nloadstep_comp = std::stoi(next_trimmed());
+        skip_to_label("BCs%nloadstep_rel");
+        bc.nloadstep_rel = std::stoi(next_trimmed());
+        skip_to_label("BCs%value_comp");
+        bc.value_comp = parse_fortran_double(next_trimmed());
+        skip_to_label("BCs%value_rel");
+        bc.value_rel = parse_fortran_double(next_trimmed());
+    } catch (const std::runtime_error&) {
+        bc.ncycles = 1;
+        bc.nloadstep_comp = bc.nloadstep;
+        bc.nloadstep_rel = 0;
+        bc.value_comp = bc.value;
+        bc.value_rel = 0.0;
+    }
 
     bc.ndofBC = static_cast<int>(bc.mdofBC.size());
     bc.ndofOP = static_cast<int>(bc.mdofOP.size());

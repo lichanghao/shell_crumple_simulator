@@ -26,6 +26,8 @@ const std::filesystem::path kCyclicDir =
     std::filesystem::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "prepro_run";
 const std::filesystem::path kSelfContactDir =
     std::filesystem::path(ORACLE_DIR) / "graphene_self_contact" / "prepro_run";
+const std::filesystem::path kBilayerTwistDir =
+    std::filesystem::path(ORACLE_DIR) / "graphene_bilayer_twist_vdw_1000" / "prepro_run";
 
 std::filesystem::path make_tmp_dir()
 {
@@ -125,6 +127,7 @@ TEST(PreprocessorOracle, ArchivedCasesIncludeGhostCoordinateArtifacts)
     EXPECT_TRUE(std::filesystem::exists(kPreproDir / "ghost_coords.dat"));
     EXPECT_TRUE(std::filesystem::exists(kCyclicDir / "ghost_coords.dat"));
     EXPECT_TRUE(std::filesystem::exists(kSelfContactDir / "ghost_coords.dat"));
+    EXPECT_TRUE(std::filesystem::exists(kBilayerTwistDir / "ghost_coords.dat"));
 }
 
 TEST(PreprocessorOracle, TempDirFactoryReturnsDistinctDirectories)
@@ -175,6 +178,38 @@ TEST(PreprocessorOracle, ArchivedSelfContactPreproInputMatchesOracleOutputs)
         work_dir.string(),
         kSelfContactDir.string(),
         1.0e-12));
+}
+
+TEST(PreprocessorOracle, ArchivedBilayerTwistVdw1000PreproInputMatchesOracleOutputs)
+{
+    const auto work_dir = make_tmp_dir();
+    std::filesystem::copy_file(kBilayerTwistDir / "data.dat",
+                               work_dir / "data.dat",
+                               std::filesystem::copy_options::overwrite_existing);
+
+    EXPECT_NO_THROW(fce::run_preprocessor(work_dir.string()));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_dims.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_BCs.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_Mesh.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_vdw.dat"));
+    EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
+        work_dir.string(),
+        kBilayerTwistDir.string(),
+        1.0e-12));
+}
+
+TEST(PreprocessorOracle, BilayerTwistVdw1000ForcesNborderOverrideToTwo)
+{
+    const auto work_dir = make_tmp_dir();
+    std::filesystem::copy_file(kBilayerTwistDir / "data.dat",
+                               work_dir / "data.dat",
+                               std::filesystem::copy_options::overwrite_existing);
+
+    EXPECT_NO_THROW(fce::run_preprocessor(work_dir.string()));
+
+    const auto dims = fce::io::read_dims((work_dir / "nano_dims.dat").string());
+    EXPECT_EQ(dims.nelem_ghost, 384);
+    EXPECT_EQ(dims.nnode_ghost, 192);
 }
 
 TEST(PreprocessorOracle, InvalidChiralityInputIsRejected)

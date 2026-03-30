@@ -1,0 +1,59 @@
+*numberofsheets
+2
+ngauss
+2
+nrow, ncol
+20 20
+20 20
+xlength ylength (nm)
+1.0 1.0
+lambda_ini
+1.0
+lattice parameter (A0 in nm)
+0.142
+nanotube numbers
+10 10
+10 10
+Want to specify the chirality independently? 1 is yes, followed by the angle
+1
+30.
+What potential? (1=Brenner REBO)
+1
+Code: 1 is bending, 2 is twisting, 3 is compression, 222 is bilayer-twist, 1000 is bilayer-twist-local-density
+1000
+Initial top-layer z-twist angle (degrees)
+30.0
+Initial inter-layer separation (nm)
+0.5
+nloadstep
+1
+W_hat?(relax at constitutive level, 1 is yes)
+1
+critglobal
+1.d-5
+critlocal
+1.d-8
+Want random imperfections? (0=no)
+0
+Amplitude of random imperfections
+0.0
+Number of ghost rows at each end
+0
+Want van der Waals? (0=no)
+1
+Number of vdW Gauss points
+3
+vdW cutoff radius
+0.6
+vdW bonded-neighbor cutoff radius
+0.61
+vdW parameter a
+2.43d-6
+vdW parameter sigma
+0.142
+vdW parameter y0
+2.7
+vdW meval
+50
+vdW density sharpness (alpha)
+200.0
