@@ -35,6 +35,12 @@ Preprocessor and simulator reference outputs for the cyclic crumpling case.
 - Simulator outputs: `energy.dat`, `force.dat`, `crease_map.dat`, `nano_final_config.dat`,
   `output.dat`, `nano_checkpoint.dat`
 
+### bspline_oracle/
+Committed Fortran oracle fixtures for `BSpline`, `DBSpline`, and `DDBSpline`.
+- Fixtures: `interior_01.dat` … `interior_05.dat`, `boundary_01.dat` … `boundary_05.dat`
+- Reproduction helper: `tools/dump_bspline_oracle.f90`
+- Source of truth: `../finite_crystal_elasticity/grapheneCompressionOriginPrePro/BSpline.f90`
+
 ## nCodeLoad Reference
 
 The standard graphene compression case uses **nCodeLoad=3** (not nCodeLoad=1 as originally
