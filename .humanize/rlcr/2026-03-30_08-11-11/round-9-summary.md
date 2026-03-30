@@ -84,6 +84,6 @@
 Round 9 materially advances the previously empty `nvdw=1` preprocessing path. The C++ preprocessor now parses the real optional vdW block from `data.dat`, writes the committed vdW payload, and matches a real Fortran self-contact oracle case end-to-end. That is not enough to close AC-8, but it does remove the “no committed `nvdw=1` oracle case” gap and narrows the remaining blocker to the larger unfinished vdW scope.
 
 ## BitLesson Delta
-- Action: added
+- Action: add
 - Lesson ID(s): `BL-20260330-data-dat-vdw-order`
 - Notes: The new lesson records that the optional `data.dat` vdW block must be parsed before the cyclic crease block; otherwise the parser silently misreads `ncrease`, suppresses `nano_vdw.dat`, and writes the wrong `nano_tub_loc.dat`.
