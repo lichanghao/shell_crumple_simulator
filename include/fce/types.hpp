@@ -104,8 +104,29 @@ struct CreaseData {
 
 struct VdwData {
     int    nvdw{0};            // 0=disabled, 1=enabled
+    int    neval{0};
+    int    meval{0};
+    int    flag{0};
+    int    ngauss_vdw{0};
+    int    ng_tot{0};
+    std::array<int, 3> nx{};
+    double r_cut{0.0};
+    double r_bond{0.0};
+    double sig{0.0};
+    double a{0.0};
+    double y0{0.0};
+    double alpha_sharp{1.0};
+    std::array<double, 2> Vcut{};
+    std::vector<std::array<double, 12>> shapef; // [igauss][inode]
+    std::vector<double> weight;                 // [igauss]
+    std::vector<Vec3> x;                       // [igauss_total]
+    std::vector<double> rho;                   // [igauss_total]
+    std::vector<std::vector<int>> near;        // [igauss_total][0..n]
+    double xc0{0.0};
+    double yc0{0.0};
     int    nself_contact{0};   // 1=same-sheet self-contact mode
-    // Full vdW state (spatial bins, neighbor lists) added in Milestone 6
+    int    nneigh{0};
+    int    ninrange{0};
 };
 
 // ─── Reference config (J0 and F0, one record per element per Gauss point) ────

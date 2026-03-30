@@ -27,6 +27,10 @@ struct DimsData {
     int  ndofBC{0};
     int  ndofOP{0};
     int  nvdw{0};
+    int  ngauss_vdw{0};
+    int  ng_tot{0};
+    int  nneigh{0};
+    int  ninrange{0};
 };
 
 DimsData read_dims(const std::string& path);
@@ -84,6 +88,11 @@ void write_mesh(const std::string& path, const Mesh& mesh, int ngauss);
 std::vector<std::pair<int,int>> read_tub_loc(const std::string& path);
 void                            write_tub_loc(const std::string& path,
                                               const std::vector<std::pair<int,int>>& parts);
+
+// ─── nano_vdw.dat ─────────────────────────────────────────────────────────────
+
+VdwData read_vdw(const std::string& path, int ng_tot, int ngauss_vdw, int nneigh);
+void    write_vdw(const std::string& path, const VdwData& vdw);
 
 // ─── nano_crease.dat ──────────────────────────────────────────────────────────
 // Only present for cyclic cases (ncrease==1).

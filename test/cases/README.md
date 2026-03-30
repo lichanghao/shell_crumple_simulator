@@ -35,6 +35,12 @@ Preprocessor and simulator reference outputs for the cyclic crumpling case.
 - Simulator outputs: `energy.dat`, `force.dat`, `crease_map.dat`, `nano_final_config.dat`,
   `output.dat`, `nano_checkpoint.dat`
 
+### graphene_self_contact/
+Preprocessor reference outputs for the single-sheet self-contact cyclic case.
+- Input: `prepro_run/data.dat` — 10×10 mesh, 5nm×5nm, nCodeLoad=30, nvdw=1, nself_contact=1,
+  4 cycles, nloadstep_comp=20, nloadstep_rel=20, ncrease=1
+- Oracle outputs: `prepro_run/nano_*.dat`, `prepro_run/ghost_coords.dat`, `prepro_run/prepro.log`
+
 ### bspline_oracle/
 Committed Fortran oracle fixtures for `BSpline`, `DBSpline`, and `DDBSpline`.
 - Fixtures: `interior_01.dat` … `interior_05.dat`, `boundary_01.dat` … `boundary_05.dat`

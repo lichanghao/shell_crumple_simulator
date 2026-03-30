@@ -46,6 +46,7 @@ add_library(fce_core
   src/core/preprocessor.cpp
   src/core/quadrature.cpp
   src/core/reference_config.cpp
+  src/core/vdw_preprocessor.cpp
 )
 target_include_directories(fce_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>

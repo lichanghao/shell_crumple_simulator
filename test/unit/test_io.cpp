@@ -12,6 +12,7 @@
 #endif
 
 static const std::string kPrepro = std::string(ORACLE_DIR) + "/graphene_compression_prepro/";
+static const std::string kSelfContact = std::string(ORACLE_DIR) + "/graphene_self_contact/prepro_run/";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,19 @@ TEST(ReadDims, GrapheneCompression) {
     EXPECT_EQ(d.ndofBC,        246);
     EXPECT_EQ(d.ndofOP,       4797);
     EXPECT_EQ(d.nvdw,            0);
+}
+
+TEST(ReadDims, GrapheneSelfContact) {
+    auto d = fce::io::read_dims(kSelfContact + "nano_dims.dat");
+    EXPECT_EQ(d.numele,        200);
+    EXPECT_EQ(d.numnods,       121);
+    EXPECT_EQ(d.nedge,          46);
+    EXPECT_EQ(d.ngauss,          2);
+    EXPECT_EQ(d.nvdw,            1);
+    EXPECT_EQ(d.ngauss_vdw,      2);
+    EXPECT_EQ(d.ng_tot,        400);
+    EXPECT_EQ(d.nneigh,         -2);
+    EXPECT_EQ(d.ninrange,    50000);
 }
 
 // ─── nano_general.dat ─────────────────────────────────────────────────────────
@@ -166,6 +180,32 @@ TEST(ReadTubLoc, GrapheneCompression) {
     // From Fortran pre_ener.f90: ielem_end = total_work_units
     // For now just check it's positive and >= 3200
     EXPECT_GT(parts[0].second, 3200);
+}
+
+TEST(ReadVdw, GrapheneSelfContact) {
+    const auto dims = fce::io::read_dims(kSelfContact + "nano_dims.dat");
+    const auto vdw = fce::io::read_vdw(kSelfContact + "nano_vdw.dat",
+                                       dims.ng_tot,
+                                       dims.ngauss_vdw,
+                                       dims.nneigh);
+    EXPECT_EQ(vdw.meval, 50);
+    EXPECT_NEAR(vdw.r_cut, 0.6, 1e-15);
+    EXPECT_NEAR(vdw.r_bond, 0.61, 1e-15);
+    EXPECT_NEAR(vdw.sig, 0.142, 1e-15);
+    EXPECT_NEAR(vdw.a, 2.43e-6, 1e-20);
+    EXPECT_NEAR(vdw.y0, 2.7, 1e-15);
+    EXPECT_NEAR(vdw.xc0, 2.5, 1e-15);
+    EXPECT_NEAR(vdw.yc0, 2.5, 1e-15);
+    ASSERT_EQ(static_cast<int>(vdw.shapef.size()), 2);
+    ASSERT_EQ(static_cast<int>(vdw.weight.size()), 2);
+    EXPECT_NEAR(vdw.shapef[0][0], 1.9290123456790152e-4, 1e-18);
+    EXPECT_NEAR(vdw.shapef[1][0], 5.7870370370370421e-4, 1e-18);
+    EXPECT_NEAR(vdw.weight[0], 0.5, 1e-15);
+    EXPECT_NEAR(vdw.weight[1], 0.5, 1e-15);
+    ASSERT_EQ(static_cast<int>(vdw.rho.size()), 400);
+    EXPECT_NEAR(vdw.rho.front(), 3.8176966818066909e1, 1e-12);
+    EXPECT_NEAR(vdw.rho.back(), 3.8176966818066909e1, 1e-12);
+    EXPECT_TRUE(vdw.near.empty());
 }
 
 // ─── MPI partition helper ─────────────────────────────────────────────────────

@@ -104,6 +104,12 @@ DimsData read_dims(const std::string& path) {
     d.ndofBC       = r.read_int();
     d.ndofOP       = r.read_int();
     d.nvdw         = r.read_int();
+    if (d.nvdw == 1) {
+        d.ngauss_vdw = r.read_int();
+        d.ng_tot = r.read_int();
+        d.nneigh = r.read_int();
+        d.ninrange = r.read_int();
+    }
     return d;
 }
 
@@ -121,6 +127,12 @@ void write_dims(const std::string& path, const DimsData& d) {
     f << " BCs%ndofBC\n"        << std::setw(9) << d.ndofBC      << "\n";
     f << " BCs%ndofOP\n"        << std::setw(9) << d.ndofOP      << "\n";
     f << " vdw1%nvdw\n"         << std::setw(9) << d.nvdw        << "\n";
+    if (d.nvdw == 1) {
+        f << " vdw1%ngauss_vdw\n" << std::setw(9) << d.ngauss_vdw << "\n";
+        f << " vdw1%ng_tot\n"     << std::setw(9) << d.ng_tot     << "\n";
+        f << " nneigh\n"          << std::setw(9) << d.nneigh     << "\n";
+        f << " ninrange\n"        << std::setw(9) << d.ninrange   << "\n";
+    }
 }
 
 // ─── nano_general.dat ─────────────────────────────────────────────────────────
@@ -598,6 +610,127 @@ void write_tub_loc(const std::string& path,
     f << std::setw(9) << static_cast<int>(parts.size()) << "\n";
     for (const auto& p : parts) {
         f << std::setw(9) << p.second << "\n"; // 0-based exclusive end → 1-based inclusive end
+    }
+}
+
+// ─── nano_vdw.dat ─────────────────────────────────────────────────────────────
+
+VdwData read_vdw(const std::string& path, int ng_tot, int ngauss_vdw, int nneigh) {
+    FileReader r(path);
+    VdwData vdw;
+    vdw.nvdw = 1;
+    vdw.ng_tot = ng_tot;
+    vdw.ngauss_vdw = ngauss_vdw;
+    vdw.nneigh = nneigh;
+
+    vdw.meval = r.read_int();
+    vdw.r_cut = r.read_double();
+    vdw.r_bond = r.read_double();
+    vdw.sig = r.read_double();
+    vdw.a = r.read_double();
+    vdw.y0 = r.read_double();
+    {
+        const auto toks = r.read_tokens();
+        if (toks.size() < 2) throw std::runtime_error("nano_vdw.dat: Vcut row too short");
+        vdw.Vcut[0] = parse_fortran_double(toks[0]);
+        vdw.Vcut[1] = parse_fortran_double(toks[1]);
+    }
+    vdw.xc0 = r.read_double();
+    vdw.yc0 = r.read_double();
+
+    vdw.shapef.assign(ngauss_vdw, std::array<double, 12>{});
+    for (int inode = 0; inode < 12; ++inode) {
+        const auto toks = r.read_tokens();
+        if (static_cast<int>(toks.size()) < ngauss_vdw) {
+            throw std::runtime_error("nano_vdw.dat: shapef row too short");
+        }
+        for (int ig = 0; ig < ngauss_vdw; ++ig) {
+            vdw.shapef[ig][inode] = parse_fortran_double(toks[ig]);
+        }
+    }
+
+    {
+        const auto toks = r.read_tokens();
+        if (static_cast<int>(toks.size()) < ngauss_vdw) {
+            throw std::runtime_error("nano_vdw.dat: weight row too short");
+        }
+        vdw.weight.resize(ngauss_vdw);
+        for (int ig = 0; ig < ngauss_vdw; ++ig) {
+            vdw.weight[ig] = parse_fortran_double(toks[ig]);
+        }
+    }
+
+    vdw.rho.reserve(ng_tot);
+    while (static_cast<int>(vdw.rho.size()) < ng_tot && r.next_data_line()) {
+        const auto toks = tokenize(r.current);
+        for (const auto& tok : toks) {
+            vdw.rho.push_back(parse_fortran_double(tok));
+            if (static_cast<int>(vdw.rho.size()) == ng_tot) {
+                break;
+            }
+        }
+    }
+    if (static_cast<int>(vdw.rho.size()) != ng_tot) {
+        throw std::runtime_error("nano_vdw.dat: rho payload size mismatch");
+    }
+
+    if (nneigh > 0) {
+        vdw.near.assign(ng_tot, std::vector<int>(nneigh + 1, 0));
+        for (int i = 0; i < ng_tot; ++i) {
+            const auto toks = r.read_tokens();
+            if (static_cast<int>(toks.size()) < nneigh + 1) {
+                throw std::runtime_error("nano_vdw.dat: near row too short");
+            }
+            for (int j = 0; j <= nneigh; ++j) {
+                vdw.near[i][j] = std::stoi(toks[j]);
+            }
+        }
+    }
+
+    return vdw;
+}
+
+void write_vdw(const std::string& path, const VdwData& vdw) {
+    std::ofstream f(path);
+    if (!f) throw std::runtime_error("Cannot write: " + path);
+
+    f << " vdw1%meval\n" << std::setw(11) << vdw.meval << "\n";
+    f << " vdw1%r_cut\n" << fmt_d(vdw.r_cut) << "\n";
+    f << " vdw1%r_bond\n" << fmt_d(vdw.r_bond) << "\n";
+    f << " vdw1%sig\n" << fmt_d(vdw.sig) << "\n";
+    f << " vdw1%a\n" << fmt_d(vdw.a) << "\n";
+    f << " vdw1%y0\n" << fmt_d(vdw.y0) << "\n";
+    f << " vdw1%Vcut(2)\n" << fmt_d(vdw.Vcut[0]) << fmt_d(vdw.Vcut[1]) << "\n";
+    f << " vdw1%xc0\n" << fmt_d(vdw.xc0) << "\n";
+    f << " vdw1%yc0\n" << fmt_d(vdw.yc0) << "\n";
+    f << " vdw1%shapef\n";
+    for (int inode = 0; inode < 12; ++inode) {
+        for (int ig = 0; ig < vdw.ngauss_vdw; ++ig) {
+            f << fmt_d(vdw.shapef[ig][inode]);
+        }
+        f << "\n";
+    }
+    f << " vdw1%weight\n";
+    for (double weight : vdw.weight) {
+        f << fmt_d(weight);
+    }
+    f << "\n";
+    f << " vdw1%rho\n";
+    for (int i = 0; i < static_cast<int>(vdw.rho.size()); ++i) {
+        if (i > 0 && i % 10 == 0) {
+            f << "\n";
+        }
+        f << fmt_d(vdw.rho[i]);
+    }
+    f << "\n";
+    f << " vdw1%near\n";
+    if (vdw.nneigh > 0) {
+        for (const auto& row : vdw.near) {
+            for (int value : row) {
+                f << std::setw(12) << value;
+            }
+            f << "\n";
+        }
     }
 }
 

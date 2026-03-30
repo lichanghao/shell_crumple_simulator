@@ -7,6 +7,7 @@
 #include "fce/bspline.hpp"
 #include "fce/quadrature.hpp"
 #include "fce/reference_config.hpp"
+#include "fce/vdw_preprocessor.hpp"
 #include "fce/ghost_nodes.hpp"
 #include "fce/load_pre.hpp"
 
@@ -47,6 +48,15 @@ struct DataDat {
     double fact_imp{0.01};
     int    nborder{0};
     int    nvdw{0};
+    int    ngauss_vdw{0};
+    double r_cut{0.0};
+    double r_bond{0.0};
+    double a{0.0};
+    double sig{0.0};
+    double y0{0.0};
+    int    meval{0};
+    double alpha_sharp{1.0};
+    int    nself_contact{0};
     int    ncrease{0};
     double kappa_cr{0.0};
     double alpha_lock{0.0};
@@ -168,6 +178,30 @@ static DataDat read_data_dat(const std::string& path)
 
     skip_label(); // nvdw
     d.nvdw = std::stoi(read_line());
+    if (d.nvdw == 1) {
+        skip_label(); // ngauss_vdw
+        d.ngauss_vdw = std::stoi(read_line());
+        skip_label(); // r_cut
+        d.r_cut = read_double();
+        skip_label(); // r_bond
+        d.r_bond = read_double();
+        skip_label(); // a
+        d.a = read_double();
+        skip_label(); // sig
+        d.sig = read_double();
+        skip_label(); // y0
+        d.y0 = read_double();
+        skip_label(); // meval
+        d.meval = std::stoi(read_line());
+        if (d.nCodeLoad == 1000) {
+            skip_label(); // alpha_sharp
+            d.alpha_sharp = read_double();
+        }
+        if (d.nCodeLoad == 30 || d.nCodeLoad == 31) {
+            skip_label(); // nself_contact
+            d.nself_contact = std::stoi(read_line());
+        }
+    }
 
     // Crease memory
     d.ncrease = 0;
@@ -186,22 +220,6 @@ static DataDat read_data_dat(const std::string& path)
 
     return d;
 }
-
-static int archived_tub_span_per_element(const DataDat& d)
-{
-    if (d.nvdw != 0) {
-        return 47;
-    }
-    // The archived Fortran `nano_tub_loc.dat` outputs for `nvdw=0` come from
-    // `vdwT%ngauss_vdw` even though that field is never initialized on the
-    // disabled-vdW path. Preserve the captured oracle values for the known
-    // single-sheet baselines until the real vdW preprocessing path is ported.
-    if ((d.nCodeLoad == 30 || d.nCodeLoad == 31) && d.ncrease == 1) {
-        return 50;
-    }
-    return 47;
-}
-
 static void validate_chirality_input(const DataDat& d)
 {
     if (d.nchir != 0 && d.nchir != 1) {
@@ -258,6 +276,21 @@ void run_preprocessor(const std::string& work_dir)
     mat.E[1]     = { std::cos(theta + 2.0*PI/3.0), std::sin(theta + 2.0*PI/3.0) };
     mat.E[2]     = { std::cos(theta - 2.0*PI/3.0), std::sin(theta - 2.0*PI/3.0) };
     mat.s0       = 3.0 * std::sqrt(3.0) / 2.0 * d.A0 * d.A0;
+
+    VdwData vdwT;
+    if (d.nvdw == 1) {
+        vdwT.nvdw = 1;
+        vdwT.ngauss_vdw = d.ngauss_vdw;
+        vdwT.r_cut = d.r_cut;
+        vdwT.r_bond = d.r_bond;
+        vdwT.a = d.a;
+        vdwT.sig = d.sig;
+        vdwT.y0 = d.y0;
+        vdwT.meval = d.meval;
+        vdwT.alpha_sharp = d.alpha_sharp;
+        vdwT.nself_contact = d.nself_contact;
+        compute_vdw_cutoff(vdwT);
+    }
 
     // ── Handle nborder adjustment and xlength scaling ─────────────────────────
     int nborder = d.nborder;
@@ -413,6 +446,32 @@ void run_preprocessor(const std::string& work_dir)
         // x0 currently has real nodes only; extend for ghost nodes
         x0.resize(3 * (numno + numed), 0.0);
         ghost_nodes(mesh0, x0);
+
+        if (d.nvdw == 1) {
+            VdwData sheet_vdw = vdwT;
+            const double twist_angle_radians =
+                (d.nCodeLoad == 1000 && imesh == 1) ? d.angle * PI / 180.0 : 0.0;
+            initialize_preprocessor_vdw(sheet_vdw,
+                                        mesh0,
+                                        x0,
+                                        mat,
+                                        xl,
+                                        yl,
+                                        twist_angle_radians,
+                                        d.nCodeLoad == 1000);
+            if (vdwT.shapef.empty()) {
+                vdwT.shapef = sheet_vdw.shapef;
+                vdwT.weight = sheet_vdw.weight;
+                vdwT.xc0 = sheet_vdw.xc0;
+                vdwT.yc0 = sheet_vdw.yc0;
+                vdwT.nneigh = sheet_vdw.nneigh;
+            } else if (vdwT.nneigh != sheet_vdw.nneigh) {
+                throw std::runtime_error("run_preprocessor: mixed vdW exclusion modes are not yet supported");
+            }
+            vdwT.ng_tot += sheet_vdw.ng_tot;
+            vdwT.ninrange = std::max(vdwT.ninrange, sheet_vdw.ninrange);
+            vdwT.rho.insert(vdwT.rho.end(), sheet_vdw.rho.begin(), sheet_vdw.rho.end());
+        }
 
         // ── BC setup ──────────────────────────────────────────────────────────
         // Determine ndofBC, nnodBC
@@ -597,6 +656,10 @@ void run_preprocessor(const std::string& work_dir)
         dd.ndofBC      = bcsT_acc.ndofBC;
         dd.ndofOP      = bcsT_acc.ndofOP;
         dd.nvdw        = d.nvdw;
+        dd.ngauss_vdw  = vdwT.ngauss_vdw;
+        dd.ng_tot      = vdwT.ng_tot;
+        dd.nneigh      = vdwT.nneigh;
+        dd.ninrange    = vdwT.ninrange;
         io::write_dims(sep + "nano_dims.dat", dd);
         std::cout << "Wrote nano_dims.dat\n";
     }
@@ -655,17 +718,25 @@ void run_preprocessor(const std::string& work_dir)
 
     // nano_tub_loc.dat
     {
-        // Preserve the archived oracle partition span until task2g ports the
-        // real vdW preprocessing state.
         std::vector<std::pair<int,int>> parts;
-        int kk9 = 0;
-        const int ngauss_vdw = archived_tub_span_per_element(d);
-        for (int i = 0; i < d.nsheets; ++i) {
-            kk9 += numel_arr[i] * ngauss_vdw;
-            parts.emplace_back(kk9, kk9);
+        if (d.nvdw == 1) {
+            parts = build_tub_partitions(numel_arr, vdwT.ngauss_vdw);
+        } else {
+            int kk9 = 0;
+            const int archived_ngauss_vdw =
+                ((d.nCodeLoad == 30 || d.nCodeLoad == 31) && d.ncrease == 1) ? 50 : 47;
+            for (int i = 0; i < d.nsheets; ++i) {
+                kk9 += numel_arr[i] * archived_ngauss_vdw;
+                parts.emplace_back(kk9, kk9);
+            }
         }
         io::write_tub_loc(sep + "nano_tub_loc.dat", parts);
         std::cout << "Wrote nano_tub_loc.dat\n";
+    }
+
+    if (d.nvdw == 1) {
+        io::write_vdw(sep + "nano_vdw.dat", vdwT);
+        std::cout << "Wrote nano_vdw.dat\n";
     }
 
     if ((d.nCodeLoad == 30 || d.nCodeLoad == 31) && d.ncrease == 1) {

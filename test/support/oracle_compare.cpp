@@ -139,6 +139,12 @@ void expect_close(MismatchCollector& mismatches,
     expect_equal_int(mismatches, "dims.ndofBC", actual_dims.ndofBC, oracle_dims.ndofBC);
     expect_equal_int(mismatches, "dims.ndofOP", actual_dims.ndofOP, oracle_dims.ndofOP);
     expect_equal_int(mismatches, "dims.nvdw", actual_dims.nvdw, oracle_dims.nvdw);
+    if (oracle_dims.nvdw == 1) {
+        expect_equal_int(mismatches, "dims.ngauss_vdw", actual_dims.ngauss_vdw, oracle_dims.ngauss_vdw);
+        expect_equal_int(mismatches, "dims.ng_tot", actual_dims.ng_tot, oracle_dims.ng_tot);
+        expect_equal_int(mismatches, "dims.nneigh", actual_dims.nneigh, oracle_dims.nneigh);
+        expect_equal_int(mismatches, "dims.ninrange", actual_dims.ninrange, oracle_dims.ninrange);
+    }
 
     const auto actual_general = io::read_general(join(actual_dir, "nano_general.dat"));
     const auto oracle_general = io::read_general(join(oracle_dir, "nano_general.dat"));
@@ -317,6 +323,66 @@ void expect_close(MismatchCollector& mismatches,
     for (int i = 0; i < static_cast<int>(oracle_tub.size()) && i < static_cast<int>(actual_tub.size()); ++i) {
         expect_equal_int(mismatches, "tub_loc[" + std::to_string(i) + "].first", actual_tub[i].first, oracle_tub[i].first);
         expect_equal_int(mismatches, "tub_loc[" + std::to_string(i) + "].second", actual_tub[i].second, oracle_tub[i].second);
+    }
+
+    const auto actual_vdw_path = std::filesystem::path(actual_dir) / "nano_vdw.dat";
+    const auto oracle_vdw_path = std::filesystem::path(oracle_dir) / "nano_vdw.dat";
+    const bool actual_has_vdw = std::filesystem::exists(actual_vdw_path);
+    const bool oracle_has_vdw = std::filesystem::exists(oracle_vdw_path);
+    expect_equal_int(mismatches,
+                     "vdw.exists",
+                     actual_has_vdw ? 1 : 0,
+                     oracle_has_vdw ? 1 : 0);
+    if (actual_has_vdw && oracle_has_vdw) {
+        const auto actual_vdw = io::read_vdw(actual_vdw_path.string(),
+                                             oracle_dims.ng_tot,
+                                             oracle_dims.ngauss_vdw,
+                                             oracle_dims.nneigh);
+        const auto oracle_vdw = io::read_vdw(oracle_vdw_path.string(),
+                                             oracle_dims.ng_tot,
+                                             oracle_dims.ngauss_vdw,
+                                             oracle_dims.nneigh);
+        expect_equal_int(mismatches, "vdw.meval", actual_vdw.meval, oracle_vdw.meval);
+        expect_close(mismatches, "vdw.r_cut", actual_vdw.r_cut, oracle_vdw.r_cut, float_abs_tol);
+        expect_close(mismatches, "vdw.r_bond", actual_vdw.r_bond, oracle_vdw.r_bond, float_abs_tol);
+        expect_close(mismatches, "vdw.sig", actual_vdw.sig, oracle_vdw.sig, float_abs_tol);
+        expect_close(mismatches, "vdw.a", actual_vdw.a, oracle_vdw.a, float_abs_tol);
+        expect_close(mismatches, "vdw.y0", actual_vdw.y0, oracle_vdw.y0, float_abs_tol);
+        expect_close(mismatches, "vdw.Vcut[0]", actual_vdw.Vcut[0], oracle_vdw.Vcut[0], float_abs_tol);
+        expect_close(mismatches, "vdw.Vcut[1]", actual_vdw.Vcut[1], oracle_vdw.Vcut[1], float_abs_tol);
+        expect_close(mismatches, "vdw.xc0", actual_vdw.xc0, oracle_vdw.xc0, float_abs_tol);
+        expect_close(mismatches, "vdw.yc0", actual_vdw.yc0, oracle_vdw.yc0, float_abs_tol);
+        for (int ig = 0; ig < oracle_dims.ngauss_vdw; ++ig) {
+            expect_close(mismatches,
+                         "vdw.weight[" + std::to_string(ig) + "]",
+                         actual_vdw.weight[ig],
+                         oracle_vdw.weight[ig],
+                         float_abs_tol);
+            for (int inode = 0; inode < 12; ++inode) {
+                expect_close(mismatches,
+                             "vdw.shapef[" + std::to_string(ig) + "][" + std::to_string(inode) + "]",
+                             actual_vdw.shapef[ig][inode],
+                             oracle_vdw.shapef[ig][inode],
+                             float_abs_tol);
+            }
+        }
+        for (int ig = 0; ig < oracle_dims.ng_tot; ++ig) {
+            expect_close(mismatches,
+                         "vdw.rho[" + std::to_string(ig) + "]",
+                         actual_vdw.rho[ig],
+                         oracle_vdw.rho[ig],
+                         float_abs_tol);
+        }
+        if (oracle_dims.nneigh > 0) {
+            for (int ig = 0; ig < oracle_dims.ng_tot; ++ig) {
+                for (int j = 0; j <= oracle_dims.nneigh; ++j) {
+                    expect_equal_int(mismatches,
+                                     "vdw.near[" + std::to_string(ig) + "][" + std::to_string(j) + "]",
+                                     actual_vdw.near[ig][j],
+                                     oracle_vdw.near[ig][j]);
+                }
+            }
+        }
     }
 
     const auto actual_crease_path = std::filesystem::path(actual_dir) / "nano_crease.dat";

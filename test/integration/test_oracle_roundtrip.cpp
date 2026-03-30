@@ -13,6 +13,7 @@
 #endif
 
 static const std::string kPrepro = std::string(ORACLE_DIR) + "/graphene_compression_prepro/";
+static const std::string kSelfContact = std::string(ORACLE_DIR) + "/graphene_self_contact/prepro_run/";
 static const std::string kTmp    = "/tmp/fce_test_";
 
 static bool near_rel(double a, double b, double rtol = 1e-10, double atol = 1e-12) {
@@ -36,6 +37,18 @@ TEST(RoundTrip, Dims) {
     EXPECT_EQ(d1.ndofBC,       d2.ndofBC);
     EXPECT_EQ(d1.ndofOP,       d2.ndofOP);
     EXPECT_EQ(d1.nvdw,         d2.nvdw);
+}
+
+TEST(RoundTrip, DimsSelfContact) {
+    auto d1 = fce::io::read_dims(kSelfContact + "nano_dims.dat");
+    std::string tmp = kTmp + "dims_self_contact.dat";
+    fce::io::write_dims(tmp, d1);
+    auto d2 = fce::io::read_dims(tmp);
+    EXPECT_EQ(d1.nvdw, d2.nvdw);
+    EXPECT_EQ(d1.ngauss_vdw, d2.ngauss_vdw);
+    EXPECT_EQ(d1.ng_tot, d2.ng_tot);
+    EXPECT_EQ(d1.nneigh, d2.nneigh);
+    EXPECT_EQ(d1.ninrange, d2.ninrange);
 }
 
 // ─── Round-trip: nano_general.dat ─────────────────────────────────────────────
@@ -146,4 +159,42 @@ TEST(RoundTrip, Mesh) {
     for (int i = 0; i < m1.nedge; ++i)
         for (int k = 0; k < 3; ++k)
             EXPECT_EQ(m1.nghost_tab[i][k], m2.nghost_tab[i][k]) << "i=" << i;
+}
+
+TEST(RoundTrip, Vdw) {
+    const auto dims = fce::io::read_dims(kSelfContact + "nano_dims.dat");
+    const auto vdw1 = fce::io::read_vdw(kSelfContact + "nano_vdw.dat",
+                                        dims.ng_tot,
+                                        dims.ngauss_vdw,
+                                        dims.nneigh);
+    std::string tmp = kTmp + "vdw.dat";
+    fce::io::write_vdw(tmp, vdw1);
+    const auto vdw2 = fce::io::read_vdw(tmp,
+                                        dims.ng_tot,
+                                        dims.ngauss_vdw,
+                                        dims.nneigh);
+    EXPECT_EQ(vdw1.meval, vdw2.meval);
+    EXPECT_TRUE(near_rel(vdw1.r_cut, vdw2.r_cut));
+    EXPECT_TRUE(near_rel(vdw1.r_bond, vdw2.r_bond));
+    EXPECT_TRUE(near_rel(vdw1.sig, vdw2.sig));
+    EXPECT_TRUE(near_rel(vdw1.a, vdw2.a));
+    EXPECT_TRUE(near_rel(vdw1.y0, vdw2.y0));
+    EXPECT_TRUE(near_rel(vdw1.Vcut[0], vdw2.Vcut[0]));
+    EXPECT_TRUE(near_rel(vdw1.Vcut[1], vdw2.Vcut[1]));
+    EXPECT_TRUE(near_rel(vdw1.xc0, vdw2.xc0));
+    EXPECT_TRUE(near_rel(vdw1.yc0, vdw2.yc0));
+    ASSERT_EQ(vdw1.shapef.size(), vdw2.shapef.size());
+    for (int ig = 0; ig < static_cast<int>(vdw1.shapef.size()); ++ig) {
+        for (int inode = 0; inode < 12; ++inode) {
+            EXPECT_TRUE(near_rel(vdw1.shapef[ig][inode], vdw2.shapef[ig][inode], 1e-12, 1e-14));
+        }
+    }
+    ASSERT_EQ(vdw1.weight.size(), vdw2.weight.size());
+    for (int ig = 0; ig < static_cast<int>(vdw1.weight.size()); ++ig) {
+        EXPECT_TRUE(near_rel(vdw1.weight[ig], vdw2.weight[ig]));
+    }
+    ASSERT_EQ(vdw1.rho.size(), vdw2.rho.size());
+    for (int ig = 0; ig < static_cast<int>(vdw1.rho.size()); ++ig) {
+        EXPECT_TRUE(near_rel(vdw1.rho[ig], vdw2.rho[ig]));
+    }
 }

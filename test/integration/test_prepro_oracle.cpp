@@ -24,6 +24,8 @@ const std::filesystem::path kPreproDir =
     std::filesystem::path(ORACLE_DIR) / "graphene_compression_prepro";
 const std::filesystem::path kCyclicDir =
     std::filesystem::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "prepro_run";
+const std::filesystem::path kSelfContactDir =
+    std::filesystem::path(ORACLE_DIR) / "graphene_self_contact" / "prepro_run";
 
 std::filesystem::path make_tmp_dir()
 {
@@ -122,6 +124,7 @@ TEST(PreprocessorOracle, ArchivedCasesIncludeGhostCoordinateArtifacts)
 {
     EXPECT_TRUE(std::filesystem::exists(kPreproDir / "ghost_coords.dat"));
     EXPECT_TRUE(std::filesystem::exists(kCyclicDir / "ghost_coords.dat"));
+    EXPECT_TRUE(std::filesystem::exists(kSelfContactDir / "ghost_coords.dat"));
 }
 
 TEST(PreprocessorOracle, TempDirFactoryReturnsDistinctDirectories)
@@ -152,6 +155,25 @@ TEST(PreprocessorOracle, ArchivedCyclicPreproInputMatchesOracleOutputs)
     EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
         work_dir.string(),
         kCyclicDir.string(),
+        1.0e-12));
+}
+
+TEST(PreprocessorOracle, ArchivedSelfContactPreproInputMatchesOracleOutputs)
+{
+    const auto work_dir = make_tmp_dir();
+    std::filesystem::copy_file(kSelfContactDir / "data.dat",
+                               work_dir / "data.dat",
+                               std::filesystem::copy_options::overwrite_existing);
+
+    EXPECT_NO_THROW(fce::run_preprocessor(work_dir.string()));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_dims.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_BCs.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_Mesh.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_crease.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_vdw.dat"));
+    EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
+        work_dir.string(),
+        kSelfContactDir.string(),
         1.0e-12));
 }
 
