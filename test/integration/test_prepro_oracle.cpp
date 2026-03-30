@@ -114,7 +114,8 @@ TEST(PreprocessorOracle, ArchivedCompressionCaseMatchesOracle)
 
     EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
         work_dir.string(),
-        kPreproDir.string()));
+        kPreproDir.string(),
+        1.0e-12));
 }
 
 TEST(PreprocessorOracle, ArchivedCasesIncludeGhostCoordinateArtifacts)
@@ -150,7 +151,8 @@ TEST(PreprocessorOracle, ArchivedCyclicPreproInputMatchesOracleOutputs)
     EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_crease.dat"));
     EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
         work_dir.string(),
-        kCyclicDir.string()));
+        kCyclicDir.string(),
+        1.0e-12));
 }
 
 TEST(PreprocessorOracle, InvalidChiralityInputIsRejected)
