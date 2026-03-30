@@ -5,6 +5,7 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -22,11 +23,17 @@ const std::filesystem::path kCyclicDir =
 
 std::filesystem::path make_tmp_dir()
 {
-    const auto dir =
-        std::filesystem::temp_directory_path() / std::filesystem::path("fce_prepro_oracle_case");
-    std::filesystem::remove_all(dir);
-    std::filesystem::create_directories(dir);
-    return dir;
+    const auto base = std::filesystem::temp_directory_path();
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        const auto unique = "fce_prepro_oracle_case_" +
+                            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) +
+                            "_" + std::to_string(attempt);
+        const auto dir = base / std::filesystem::path(unique);
+        if (std::filesystem::create_directory(dir)) {
+            return dir;
+        }
+    }
+    throw std::runtime_error("Failed to create unique temporary oracle directory");
 }
 
 std::string read_text_file(const std::filesystem::path& path)
@@ -67,6 +74,19 @@ TEST(PreprocessorOracle, ArchivedCompressionCaseMatchesOracle)
     EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
         work_dir.string(),
         kPreproDir.string()));
+}
+
+TEST(PreprocessorOracle, TempDirFactoryReturnsDistinctDirectories)
+{
+    const auto dir1 = make_tmp_dir();
+    const auto dir2 = make_tmp_dir();
+
+    EXPECT_NE(dir1, dir2);
+    EXPECT_TRUE(std::filesystem::exists(dir1));
+    EXPECT_TRUE(std::filesystem::exists(dir2));
+
+    std::filesystem::remove_all(dir1);
+    std::filesystem::remove_all(dir2);
 }
 
 TEST(PreprocessorOracle, ArchivedCyclicPreproInputMatchesOracleOutputs)

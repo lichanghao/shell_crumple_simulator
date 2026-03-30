@@ -1,5 +1,6 @@
 #include "oracle_compare.hpp"
 
+#include "fce/ghost_nodes.hpp"
 #include "fce/io.hpp"
 
 #include <cmath>
@@ -44,6 +45,18 @@ private:
 std::string join(const std::string& dir, const std::string& file)
 {
     return (std::filesystem::path(dir) / file).string();
+}
+
+FlatCoords flatten_coords(const io::ConfigData& config)
+{
+    FlatCoords flat;
+    flat.reserve(config.coords.size() * 3);
+    for (const auto& xyz : config.coords) {
+        flat.push_back(xyz[0]);
+        flat.push_back(xyz[1]);
+        flat.push_back(xyz[2]);
+    }
+    return flat;
 }
 
 bool near_abs(double lhs, double rhs, double tol)
@@ -235,6 +248,22 @@ void expect_close(MismatchCollector& mismatches,
                              "mesh.nghost_tab[" + std::to_string(edge) + "][" + std::to_string(i) + "]",
                              actual_mesh.nghost_tab[edge][i],
                              oracle_mesh.nghost_tab[edge][i]);
+        }
+    }
+
+    auto actual_with_ghosts = flatten_coords(actual_config);
+    auto oracle_with_ghosts = flatten_coords(oracle_config);
+    ghost_nodes(actual_mesh, actual_with_ghosts);
+    ghost_nodes(oracle_mesh, oracle_with_ghosts);
+    for (int edge = 0; edge < oracle_mesh.nedge && edge < actual_mesh.nedge; ++edge) {
+        const int actual_base = (actual_mesh.numnods + edge) * 3;
+        const int oracle_base = (oracle_mesh.numnods + edge) * 3;
+        for (int dim = 0; dim < 3; ++dim) {
+            expect_close(mismatches,
+                         "ghost_coords[" + std::to_string(edge) + "][" + std::to_string(dim) + "]",
+                         actual_with_ghosts[actual_base + dim],
+                         oracle_with_ghosts[oracle_base + dim],
+                         float_abs_tol);
         }
     }
 
