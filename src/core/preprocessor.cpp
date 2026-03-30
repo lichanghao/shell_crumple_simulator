@@ -285,6 +285,8 @@ void run_preprocessor(const std::string& work_dir)
     bcsT_acc.value_rel   = bcsT.value_rel;
 
     int nodT_acc = 0, nelT_acc = 0, nedT_acc = 0;
+    BCData first_sheet_bc;
+    bool first_sheet_bc_captured = false;
 
     for (int imesh = 0; imesh < d.nsheets; ++imesh) {
         int nrow = nrow_eff[imesh];
@@ -431,6 +433,10 @@ void run_preprocessor(const std::string& work_dir)
         // Call load_pre with real nodes only (x0[0..3*numno-1])
         FlatCoords x0_real(x0.begin(), x0.begin() + 3 * numno);
         load_pre(x0_real, mesh0, bc, xl, yl, nrow, ncol, nborder, imesh + 1, d.angle2);
+        if (!first_sheet_bc_captured) {
+            first_sheet_bc = bc;
+            first_sheet_bc_captured = true;
+        }
 
         // ── Merge into total ──────────────────────────────────────────────────
         // Accumulate BCsT
@@ -526,41 +532,10 @@ void run_preprocessor(const std::string& work_dir)
 
     // Finalize BCsT
     bcsT_acc.value   = d.angle;
-    bcsT_acc.xc      = bcsT_acc.xc; // will be overwritten below
-    // xc and rotation come from first sheet's BCs (set from load_pre)
-    // We need to extract them. Let's recompute for single-sheet case.
-    // For simplicity (oracle has 1 sheet), re-run load_pre for xc/rotation only.
-    {
-        // Recompute xc from x0T real nodes of first sheet
-        double sum[3] = {0,0,0};
-        int n0 = numno_arr[0];
-        for (int i = 0; i < n0; ++i) {
-            sum[0] += x0T[i*3+0];
-            sum[1] += x0T[i*3+1];
-            sum[2] += x0T[i*3+2];
-        }
-        bcsT_acc.xc = {sum[0]/n0, sum[1]/n0, sum[2]/n0};
-
-        // Rotation from first sheet
-        BCData bc_tmp;
-        bc_tmp.nCodeLoad    = d.nCodeLoad;
-        bc_tmp.nloadstep    = d.nloadstep;
-        bc_tmp.value        = d.angle;
-        bc_tmp.ncycles      = d.ncycles;
-        bc_tmp.nloadstep_comp = d.nloadstep;
-        bc_tmp.nloadstep_rel  = d.nloadstep_rel;
-        bc_tmp.value_comp   = d.angle;
-        bc_tmp.value_rel    = d.angle2;
-        bc_tmp.nnodBC = 0; bc_tmp.ndofBC = 0;
-        Mesh dummy;
-        dummy.numnods = numno_arr[0];
-        FlatCoords x0_dummy(x0T.begin(), x0T.begin() + 3 * numno_arr[0]);
-        load_pre(x0_dummy, dummy, bc_tmp,
-                 xlength_scaled, ylength,
-                 nrow_eff[0], ncol_eff[0], nborder, 1, d.angle2);
-        bcsT_acc.rotation = bc_tmp.rotation;
-        bcsT_acc.xc       = bc_tmp.xc;
-        bcsT_acc.value    = bc_tmp.value; // may be modified (e.g. radians for code=1)
+    if (first_sheet_bc_captured) {
+        bcsT_acc.rotation = first_sheet_bc.rotation;
+        bcsT_acc.xc = first_sheet_bc.xc;
+        bcsT_acc.value = first_sheet_bc.value;
     }
 
     // ── Write output files ────────────────────────────────────────────────────

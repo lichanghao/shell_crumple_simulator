@@ -15,6 +15,8 @@ namespace {
 
 const std::filesystem::path kPreproDir =
     std::filesystem::path(ORACLE_DIR) / "graphene_compression_prepro";
+const std::filesystem::path kCyclicDir =
+    std::filesystem::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "prepro_run";
 
 std::filesystem::path make_tmp_dir()
 {
@@ -39,4 +41,17 @@ TEST(PreprocessorOracle, ArchivedCompressionCaseMatchesOracle)
     EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
         work_dir.string(),
         kPreproDir.string()));
+}
+
+TEST(PreprocessorOracle, ArchivedCyclicPreproInputDoesNotCrash)
+{
+    const auto work_dir = make_tmp_dir();
+    std::filesystem::copy_file(kCyclicDir / "data.dat",
+                               work_dir / "data.dat",
+                               std::filesystem::copy_options::overwrite_existing);
+
+    EXPECT_NO_THROW(fce::run_preprocessor(work_dir.string()));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_dims.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_BCs.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_Mesh.dat"));
 }
