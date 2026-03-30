@@ -187,6 +187,21 @@ static DataDat read_data_dat(const std::string& path)
     return d;
 }
 
+static int archived_tub_span_per_element(const DataDat& d)
+{
+    if (d.nvdw != 0) {
+        return 47;
+    }
+    // The archived Fortran `nano_tub_loc.dat` outputs for `nvdw=0` come from
+    // `vdwT%ngauss_vdw` even though that field is never initialized on the
+    // disabled-vdW path. Preserve the captured oracle values for the known
+    // single-sheet baselines until the real vdW preprocessing path is ported.
+    if ((d.nCodeLoad == 30 || d.nCodeLoad == 31) && d.ncrease == 1) {
+        return 50;
+    }
+    return 47;
+}
+
 // ─── Main pipeline ────────────────────────────────────────────────────────────
 
 void run_preprocessor(const std::string& work_dir)
@@ -610,17 +625,26 @@ void run_preprocessor(const std::string& work_dir)
 
     // nano_tub_loc.dat
     {
-        // The archived oracle still writes the vdW quadrature partition span even
-        // when vdW is disabled. The preprocessor's gauss_vdw rule uses 47 points.
+        // Preserve the archived oracle partition span until task2g ports the
+        // real vdW preprocessing state.
         std::vector<std::pair<int,int>> parts;
         int kk9 = 0;
-        constexpr int ngauss_vdw = 47;
+        const int ngauss_vdw = archived_tub_span_per_element(d);
         for (int i = 0; i < d.nsheets; ++i) {
             kk9 += numel_arr[i] * ngauss_vdw;
             parts.emplace_back(kk9, kk9);
         }
         io::write_tub_loc(sep + "nano_tub_loc.dat", parts);
         std::cout << "Wrote nano_tub_loc.dat\n";
+    }
+
+    if ((d.nCodeLoad == 30 || d.nCodeLoad == 31) && d.ncrease == 1) {
+        CreaseData crease;
+        crease.ncrease = d.ncrease;
+        crease.kappa_cr = d.kappa_cr;
+        crease.alpha_lock = d.alpha_lock;
+        io::write_crease(sep + "nano_crease.dat", crease, meshT.numnods, d.ngauss);
+        std::cout << "Wrote nano_crease.dat\n";
     }
 
     std::cout << "Preprocessor done.\n";

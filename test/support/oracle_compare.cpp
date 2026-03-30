@@ -246,6 +246,32 @@ void expect_close(MismatchCollector& mismatches,
         expect_equal_int(mismatches, "tub_loc[" + std::to_string(i) + "].second", actual_tub[i].second, oracle_tub[i].second);
     }
 
+    const auto actual_crease_path = std::filesystem::path(actual_dir) / "nano_crease.dat";
+    const auto oracle_crease_path = std::filesystem::path(oracle_dir) / "nano_crease.dat";
+    const bool actual_has_crease = std::filesystem::exists(actual_crease_path);
+    const bool oracle_has_crease = std::filesystem::exists(oracle_crease_path);
+    expect_equal_int(mismatches,
+                     "crease.exists",
+                     actual_has_crease ? 1 : 0,
+                     oracle_has_crease ? 1 : 0);
+    if (actual_has_crease && oracle_has_crease) {
+        const auto actual_crease =
+            io::read_crease(actual_crease_path.string(), oracle_dims.numnods, oracle_dims.ngauss);
+        const auto oracle_crease =
+            io::read_crease(oracle_crease_path.string(), oracle_dims.numnods, oracle_dims.ngauss);
+        expect_equal_int(mismatches, "crease.ncrease", actual_crease.ncrease, oracle_crease.ncrease);
+        expect_close(mismatches,
+                     "crease.kappa_cr",
+                     actual_crease.kappa_cr,
+                     oracle_crease.kappa_cr,
+                     float_abs_tol);
+        expect_close(mismatches,
+                     "crease.alpha_lock",
+                     actual_crease.alpha_lock,
+                     oracle_crease.alpha_lock,
+                     float_abs_tol);
+    }
+
     if (!mismatches.empty()) {
         return ::testing::AssertionFailure() << mismatches.str();
     }

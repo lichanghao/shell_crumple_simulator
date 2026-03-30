@@ -43,7 +43,7 @@ TEST(PreprocessorOracle, ArchivedCompressionCaseMatchesOracle)
         kPreproDir.string()));
 }
 
-TEST(PreprocessorOracle, ArchivedCyclicPreproInputDoesNotCrash)
+TEST(PreprocessorOracle, ArchivedCyclicPreproInputMatchesOracleOutputs)
 {
     const auto work_dir = make_tmp_dir();
     std::filesystem::copy_file(kCyclicDir / "data.dat",
@@ -54,4 +54,8 @@ TEST(PreprocessorOracle, ArchivedCyclicPreproInputDoesNotCrash)
     EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_dims.dat"));
     EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_BCs.dat"));
     EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_Mesh.dat"));
+    EXPECT_TRUE(std::filesystem::exists(work_dir / "nano_crease.dat"));
+    EXPECT_TRUE(fce::test_support::compare_preprocessor_outputs(
+        work_dir.string(),
+        kCyclicDir.string()));
 }

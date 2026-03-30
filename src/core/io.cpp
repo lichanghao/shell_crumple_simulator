@@ -602,25 +602,27 @@ void write_tub_loc(const std::string& path,
 
 CreaseData read_crease(const std::string& path, int numnods, int ngauss) {
     (void)numnods;
-    // Format: written by write_checkpoint in read.f90
-    // K0_ref(igauss, k, ielem) for k=1..3 (Voigt)
-    // Stored in file as: for each element, for each gauss point, 3 doubles
     FileReader r(path);
     CreaseData c;
-    // First read header: ncrease, kappa_cr, alpha_lock, then K0_ref
-    // Actually from Fortran crease.f90 init:
-    // This is the standalone nano_crease.dat from the prepro (not the checkpoint version).
-    // The prepro writes this? Let's check.
-    // From conventions doc: "Reference curvature tensor K0_ref for crease memory"
-    // For now, read a minimal structure. Full implementation in Milestone 7.
-    (void)r; (void)ngauss;
+    c.ncrease = r.read_int();
+    c.kappa_cr = r.read_double();
+    c.alpha_lock = r.read_double();
+    (void)ngauss;
     return c;
 }
 
 void write_crease(const std::string& path, const CreaseData& c,
                   int numnods, int ngauss) {
-    (void)path; (void)c; (void)numnods; (void)ngauss;
-    // Stub: implemented in Milestone 7
+    (void)numnods;
+    (void)ngauss;
+    std::ofstream f(path);
+    if (!f) throw std::runtime_error("Cannot write: " + path);
+    f << " ncrease\n";
+    f << std::setw(12) << c.ncrease << "\n";
+    f << " kappa_cr\n";
+    f << fmt_d(c.kappa_cr) << "\n";
+    f << " alpha_lock\n";
+    f << fmt_d(c.alpha_lock) << "\n";
 }
 
 } // namespace io
