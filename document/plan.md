@@ -64,13 +64,13 @@ Following TDD philosophy, each criterion includes positive and negative tests fo
 
 - **AC-7**: End-to-end graphene compression simulation matches Fortran oracle within engineering tolerance.
   - Positive Tests (expected to PASS):
-    - For graphene 20 nm×20 nm, nCodeLoad=1, nloadstep=100 (serial, np=1): total energy at each load step agrees with Fortran within relative 1×10⁻⁴ (absolute tolerance floor 1×10⁻¹² eV).
-    - Reaction force at final load step (step 100) agrees with Fortran within relative 1×10⁻³.
-    - Nodal displacements at step 50 agree with Fortran within relative 1×10⁻³ (absolute floor 1×10⁻¹² nm).
-    - Simulation exits cleanly with no NaN/Inf in energy or forces throughout all 100 load steps.
+    - For graphene 20 nm×20 nm, nCodeLoad=3 (uniaxial compression), nloadstep=50 (serial, np=1): total energy at each load step agrees with Fortran within relative 1×10⁻⁴ (absolute tolerance floor 1×10⁻¹² eV).
+    - Reaction force at final load step (step 50) agrees with Fortran within relative 1×10⁻³.
+    - Nodal displacements at step 25 agree with Fortran within relative 1×10⁻³ (absolute floor 1×10⁻¹² nm).
+    - Simulation exits cleanly with no NaN/Inf in energy or forces throughout all 50 load steps.
   - Negative Tests (expected to FAIL):
     - A simulation with deliberately corrupted `nano_Mesh.dat` (wrong connectivity) diverges or produces NaN, detected before completing.
-    - Running with `np=1` vs `np=4` on the same case produces results consistent within the stated tolerances (MPI consistency check).
+    - Running with `np=1` vs `np=4` on the same nCodeLoad=3 case produces results consistent within the stated tolerances (MPI consistency check).
 
 - **AC-8**: Van der Waals interactions (Lennard-Jones type) are correctly implemented and verified.
   - Positive Tests (expected to PASS):
@@ -81,9 +81,9 @@ Following TDD philosophy, each criterion includes positive and negative tests fo
     - Pairs within the topological exclusion distance are NOT included in the self-contact neighbor list.
     - A pair beyond the cutoff radius `r_cut` contributes zero energy, not a small nonzero value.
 
-- **AC-9**: Cyclic loading (nCodeLoad=30/31) and crease memory function correctly.
+- **AC-9**: Cyclic loading (nCodeLoad=31) and crease memory function correctly. The oracle baseline is nCodeLoad=31 (biaxial corner-loaded), which is the only cyclic case archived in the Fortran oracle repository. nCodeLoad=30 (uniaxial cyclic) is architecturally supported but uses the same controller logic and is not separately baselined.
   - Positive Tests (expected to PASS):
-    - For nCodeLoad=30 (uniaxial cyclic): loading/release phase signs flip correctly; L-BFGS history resets at phase transitions.
+    - For nCodeLoad=31 (biaxial cyclic): loading/release phase signs flip correctly for all four corner DOFs; L-BFGS history resets at phase transitions.
     - `K0_ref` (reference curvature) is updated correctly after each release phase, matching Fortran `crease.f90` update logic.
     - Crease detection output `crease_map.dat` (columns: ielem, kappa_mean, kappa_max, is_creased, n_neigh, min_dihedral_deg) is generated with values matching Fortran within relative 1×10⁻⁴.
   - Negative Tests (expected to FAIL):
@@ -193,7 +193,7 @@ finite_crystal_elasticity_Cpp/
 1. **Milestone 0 — Fortran Archaeology and Oracle Capture**
    - Phase A: Build Fortran PrePro and crunch_it from commit `7d3f77f` on the project's macOS environment (gfortran/mpif90).
    - Phase B: Run graphene 20 nm×20 nm compression case; archive all `nano_*.dat` input/output and energy log in `test/cases/`.
-   - Phase C: Run a cyclic crumpling case (nCodeLoad=30) and archive its outputs.
+   - Phase C: Run a cyclic crumpling case (nCodeLoad=31, biaxial corner-loaded) and archive its outputs. No nCodeLoad=30 test case exists in the oracle repository; nCodeLoad=31 is the verified cyclic baseline.
    - Phase D: Write `document/fortran_conventions.md`: 1-based indexing, units, file format field ordering, sign conventions, MPI rank-0 output assumption, active source files list (including `lbfgs.f`).
 
 2. **Milestone 1 — Project Infrastructure**
@@ -224,7 +224,7 @@ finite_crystal_elasticity_Cpp/
 5. **Milestone 4 — FEM Solver Core**
    - Phase A: Global energy and force assembly with MPI element partitioning (`energy.f90`, `pre_ener.f90`).
    - Phase B: L-BFGS minimizer translated from `lbfgs.f` + Wolfe line search; verify against Fortran convergence trajectory.
-   - Phase C: Loading controller for all nCodeLoad modes in v1 scope (nCodeLoad=1) (`load.f90` simulator side).
+   - Phase C: Loading controller for nCodeLoad=3 (standard compression) and nCodeLoad=30/31 stubs (`load.f90` simulator side). AC-7 validation uses nCodeLoad=3.
    - Phase D: Pasapas load-stepping loop (`pasapas.f90`).
    - Phase E: Reaction force and torque computation (`get_reac.f90`).
    - Phase F: End-to-end serial run vs oracle; verify AC-7.
@@ -280,7 +280,7 @@ finite_crystal_elasticity_Cpp/
 | task3f | Principal curvature extraction | AC-7, AC-9 | coding | task3e |
 | task4a | Global energy/force assembly with MPI element partitioning | AC-7, AC-11 | coding | task3e, task1d |
 | task4b | L-BFGS minimizer translated from lbfgs.f with convergence tests | AC-7 | coding | task4a |
-| task4c | Loading controller for nCodeLoad=1 | AC-7 | coding | task1b |
+| task4c | Loading controller for nCodeLoad=3 (standard compression); stubs for nCodeLoad=30/31 | AC-7 | coding | task1b |
 | task4d | Pasapas load-stepping loop | AC-7 | coding | task4b, task4c |
 | task4e | Reaction force and torque computation | AC-7 | coding | task4d |
 | task4f | End-to-end serial run vs oracle (AC-7 full verification) | AC-7 | coding | task4d, task4e |
