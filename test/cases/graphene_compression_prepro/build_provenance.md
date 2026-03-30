@@ -49,12 +49,16 @@ The committed `ghost_coords.dat` oracle artifact was generated from the same fro
 using the canonical `ghost_nodes` subroutine in `grapheneCompressionOriginPrePro/connect_mesh.f90`
 applied to the archived `nano_Mesh.dat` + `nano_config.dat` inputs.
 
-Generation flow:
+Reproduction helper committed in this repository:
+`test/cases/tools/dump_ghost_coords.f90`
+
+Generation flow (from the C++ repo root):
 ```bash
-gfortran -c -O0 -fallow-argument-mismatch grapheneCompressionOriginPrePro/headers.f90
-gfortran -c -O0 -fallow-argument-mismatch grapheneCompressionOriginPrePro/connect_mesh.f90
-gfortran -O0 -fallow-argument-mismatch dump_ghost_coords.f90 headers.o connect_mesh.o -o dump_ghost_coords
-./dump_ghost_coords <case-dir>
+gfortran -c -O0 -fallow-argument-mismatch ../finite_crystal_elasticity/grapheneCompressionOriginPrePro/headers.f90 -J /tmp -o /tmp/headers.o
+gfortran -c -O0 -fallow-argument-mismatch ../finite_crystal_elasticity/grapheneCompressionOriginPrePro/connect_mesh.f90 -I /tmp -J /tmp -o /tmp/connect_mesh.o
+gfortran -O0 -fallow-argument-mismatch test/cases/tools/dump_ghost_coords.f90 /tmp/headers.o /tmp/connect_mesh.o -I /tmp -J /tmp -o /tmp/dump_ghost_coords
+/tmp/dump_ghost_coords test/cases/graphene_compression_prepro
+/tmp/dump_ghost_coords test/cases/graphene_cyclic_crumple/prepro_run
 ```
 
 The helper writes one `x y z` triplet per ghost node in oracle order. The same procedure was used
