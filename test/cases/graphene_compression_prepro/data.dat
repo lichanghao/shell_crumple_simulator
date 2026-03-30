@@ -1,0 +1,39 @@
+*numberofsheets
+1
+ngauss
+2
+nrow, ncol
+40 40
+xlength ylength (nm) for 20nm x 20nm flat graphene sheet
+20 20
+lambda_ini
+1.0
+lattice parameter (A0 in nm, C-C bond length for Brenner)
+0.142
+nanotube numbers (chirality indices, used only if nchir=0)
+10 10
+Want to specify the chirality independently? 1 is yes, followed by the angle (0 is zig-zag and 30 is arm-chair)
+1
+30.
+What potential? (1=Brenner REBO)
+1
+Code: 1 is bending, 2 is twisting, 3 is compression
+3
+Percentage of compression (total value passed to BCs)
+1.0
+nloadstep
+50
+W_hat?(relax at constitutive level, 1 is yes)
+0
+critglobal
+1.d-5
+critlocal
+1.d-8
+Want random imperfections? (0=no)
+1
+Amplitude of random imperfections
+0.01
+Number of ghost rows at each end
+0
+Want van der Waals? (0=no)
+0

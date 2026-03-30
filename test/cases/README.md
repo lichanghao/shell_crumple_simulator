@@ -1,0 +1,45 @@
+# Oracle Reference Cases
+
+These directories contain archived reference outputs from the canonical Fortran oracle.
+
+## Oracle Baseline
+
+- **Repository**: `../finite_crystal_elasticity/` (Fortran 90 source)
+- **Frozen commit**: `7d3f77f` ("Document Modules 1–3 in build_and_run_notes.md")
+- **Compiler**: gfortran 15.2.0 (Homebrew GCC) + mpif90 (OpenMPI)
+- **Platform**: macOS Darwin 24.6.0
+
+## Case Inventory
+
+### graphene_compression_prepro/
+Preprocessor reference outputs for the standard graphene compression case.
+- Input: `data.dat` — 40×40 mesh, 20nm×20nm, nCodeLoad=3 (compression), nloadstep=50
+- Oracle outputs: `nano_BCs.dat`, `nano_config.dat`, `nano_dims.dat`, `nano_general.dat`,
+  `nano_Mesh.dat`, `nano_tub_loc.dat`, `nano_zero.dat`, `meshini.msh`
+- Build log: `prepro.log`
+
+### graphene_compression_simulator/
+Simulator reference outputs for the standard graphene compression case (serial, np=1).
+- Input: nano_*.dat files from graphene_compression_prepro/
+- Oracle outputs: `energy.dat` (53 lines = header + 2 init + 50 steps), `force.dat`,
+  `nano_final_config.dat`, `output.dat`
+- Build/run log: `simulator.log`
+
+### graphene_cyclic_crumple/
+Preprocessor and simulator reference outputs for the cyclic crumpling case.
+- Input: `prepro_run/data.dat` — 40×40 mesh, 20nm×20nm, nCodeLoad=31 (biaxial cyclic),
+  5 cycles, nloadstep_comp=20, nloadstep_rel=20, ncrease=1
+- Simulator outputs: `energy.dat`, `force.dat`, `crease_map.dat`, `nano_final_config.dat`,
+  `output.dat`, `nano_checkpoint.dat`
+
+## nCodeLoad Reference
+
+The standard graphene compression case uses **nCodeLoad=3** (not nCodeLoad=1 as originally
+written in the plan). The plan's AC-7 and task4c have been updated to reflect this.
+
+nCodeLoad values in the Fortran simulator (load.f90):
+- 1, 2: rotation/twist modes
+- 3: uniaxial compression (one edge fixed, one edge compressed in x)
+- 10, 11, 13: other loading modes
+- 30: uniaxial cyclic compression (compress-release cycles)
+- 31: biaxial cyclic compression (corner-loaded)
