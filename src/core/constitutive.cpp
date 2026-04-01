@@ -1,5 +1,6 @@
 #include "fce/constitutive.hpp"
 
+#include "fce/element_state.hpp"
 #include "fce/exponential.hpp"
 #include "fce/taylor.hpp"
 
@@ -478,6 +479,12 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
     return out;
 }
 
+InnerPotentialOutput evaluate_inner_potential(const ElementState& state,
+                                              const MatData& mat,
+                                              const Vec2& eta) {
+    return evaluate_inner_potential(state.C_elem, state.curvppal, state.vppal, mat, eta);
+}
+
 NewtonInnerOutput solve_inner_newton(const Voigt3& C_elem,
                                      const Vec2& curvppal,
                                      const Mat22& vppal,
@@ -555,6 +562,14 @@ NewtonInnerOutput solve_inner_newton(const Voigt3& C_elem,
     out.ddWdeta = current.ddWdeta;
     out.dW_dpe = current.dW_dpe;
     return out;
+}
+
+NewtonInnerOutput solve_inner_newton(const ElementState& state,
+                                     const MatData& mat,
+                                     const Vec2& eta0,
+                                     const double crit,
+                                     const int max_iter) {
+    return solve_inner_newton(state.C_elem, state.curvppal, state.vppal, mat, eta0, crit, max_iter);
 }
 
 }  // namespace fce

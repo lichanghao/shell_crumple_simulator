@@ -39,6 +39,7 @@ FetchContent_MakeAvailable(googletest)
 add_library(fce_core
   src/core/bspline.cpp
   src/core/constitutive.cpp
+  src/core/element_state.cpp
   src/core/exponential.cpp
   src/core/geometry.cpp
   src/core/ghost_nodes.cpp
@@ -85,6 +86,7 @@ enable_testing()
 add_executable(unit_tests
   test/unit/test_bspline.cpp
   test/unit/test_constitutive.cpp
+  test/unit/test_element_state.cpp
   test/unit/test_exponential.cpp
   test/unit/test_geometry.cpp
   test/unit/test_ghost_nodes.cpp
