@@ -39,11 +39,13 @@ FetchContent_MakeAvailable(googletest)
 add_library(fce_core
   src/core/bspline.cpp
   src/core/constitutive.cpp
+  src/core/exponential.cpp
   src/core/ghost_nodes.cpp
   src/core/io.cpp
   src/core/load_pre.cpp
   src/core/mesh_generator.cpp
   src/core/mpi_env.cpp
+  src/core/principal.cpp
   src/core/preprocessor.cpp
   src/core/quadrature.cpp
   src/core/reference_config.cpp
@@ -82,9 +84,11 @@ enable_testing()
 add_executable(unit_tests
   test/unit/test_bspline.cpp
   test/unit/test_constitutive.cpp
+  test/unit/test_exponential.cpp
   test/unit/test_ghost_nodes.cpp
   test/unit/test_io.cpp
   test/unit/test_mpi_env.cpp
+  test/unit/test_principal.cpp
   test/unit/test_reference_config.cpp
 )
 target_link_libraries(unit_tests PRIVATE
