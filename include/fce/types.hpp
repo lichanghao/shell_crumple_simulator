@@ -79,7 +79,7 @@ struct BCData {
 // ─── Material (mirrors Fortran TYPE material in data_mat) ────────────────────
 
 struct MatData {
-    int    nCode_Pot{1};           // 1 = Brenner REBO
+    int    nCode_Pot{2};           // 2 = Brenner REBO inner-relaxation path
     double A0{0.142};              // equilibrium C-C bond length (nm)
     double s0{0};                  // reference unit cell area (nm²)
     double A1{0};                  // (unused in graphene path)

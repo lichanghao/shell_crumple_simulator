@@ -16,6 +16,7 @@ constexpr std::array<std::array<int, 2>, 3> kBondPermutations{{
     {{2, 0}},
     {{0, 1}},
 }};
+constexpr double kBrennerCutoffRadius = 0.17;
 
 double dot(const Vec2& a, const Vec2& b) {
     return a[0] * b[0] + a[1] * b[1];
@@ -177,6 +178,12 @@ BrennerOutput evaluate_brenner(const MatData& mat, const Vec6& pe) {
     }
 
     BrennerOutput out;
+    if (std::any_of(pe.begin(), pe.begin() + 3, [](double a) {
+            return a >= kBrennerCutoffRadius;
+        })) {
+        return out;
+    }
+
     const Vec3 theta{pe[3], pe[4], pe[5]};
     const auto ga = gang_bis(theta, mat);
 

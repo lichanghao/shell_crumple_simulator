@@ -57,7 +57,7 @@ program dump_constitutive_oracle
   end interface
 
   integer, parameter :: nbrenner = 10
-  integer, parameter :: nnewton = 4
+  integer, parameter :: nnewton = 10
   character(len=512) :: out_dir
   character(len=512) :: brenner_dir
   character(len=512) :: newton_dir
@@ -205,6 +205,44 @@ contains
     vppal_cases(4, :, :) = reshape([1.d0, 0.d0, 0.d0, 1.d0], [2, 2])
     eta_cases(4, :) = [0.020d0, -0.015d0]
     crit_maxn(4, :) = [1.d-12, 0.d0]
+
+    C_cases(5, :) = [1.06d0, 0.94d0, 0.02d0]
+    curv_cases(5, :) = [-0.04d0, 0.06d0]
+    vppal_cases(5, :, :) = reshape([0.8660254037844386d0, -0.5d0, 0.5d0, 0.8660254037844386d0], [2, 2])
+    eta_cases(5, :) = [0.001d0, 0.004d0]
+    crit_maxn(5, :) = [1.d-8, 20.d0]
+
+    C_cases(6, :) = [0.93d0, 1.08d0, -0.03d0]
+    curv_cases(6, :) = [0.03d0, 0.07d0]
+    vppal_cases(6, :, :) = reshape([0.9396926207859084d0, 0.3420201433256687d0, &
+                                    -0.3420201433256687d0, 0.9396926207859084d0], [2, 2])
+    eta_cases(6, :) = [-0.003d0, 0.005d0]
+    crit_maxn(6, :) = [1.d-8, 20.d0]
+
+    C_cases(7, :) = [1.12d0, 1.01d0, 0.04d0]
+    curv_cases(7, :) = [-0.06d0, -0.02d0]
+    vppal_cases(7, :, :) = reshape([1.d0, 0.d0, 0.d0, 1.d0], [2, 2])
+    eta_cases(7, :) = [-0.002d0, 0.006d0]
+    crit_maxn(7, :) = [1.d-8, 25.d0]
+
+    C_cases(8, :) = [0.89d0, 0.95d0, 0.05d0]
+    curv_cases(8, :) = [0.01d0, -0.08d0]
+    vppal_cases(8, :, :) = reshape([0.7071067811865476d0, -0.7071067811865476d0, &
+                                    0.7071067811865476d0, 0.7071067811865476d0], [2, 2])
+    eta_cases(8, :) = [0.005d0, -0.001d0]
+    crit_maxn(8, :) = [1.d-8, 25.d0]
+
+    C_cases(9, :) = [0.7d0, 0.7d0, -0.3d0]
+    curv_cases(9, :) = [-0.2d0, -0.2d0]
+    vppal_cases(9, :, :) = reshape([1.d0, 0.d0, 0.d0, 1.d0], [2, 2])
+    eta_cases(9, :) = [-0.12d0, -0.12d0]
+    crit_maxn(9, :) = [1.d-8, 20.d0]
+
+    C_cases(10, :) = [0.8d0, 0.8d0, 0.d0]
+    curv_cases(10, :) = [-0.2d0, -0.2d0]
+    vppal_cases(10, :, :) = reshape([-1.d0, -1.d0, 0.d0, 0.d0], [2, 2])
+    eta_cases(10, :) = [-0.02d0, -0.02d0]
+    crit_maxn(10, :) = [1.d-8, 5.d0]
   end subroutine init_newton_cases
 
   subroutine fill_identity_eta_derivs(dpedeta, ddpedeta)

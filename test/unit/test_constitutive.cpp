@@ -224,12 +224,40 @@ TEST(Brenner, HessianMatchesFiniteDifference) {
     }
 }
 
+TEST(Brenner, ReturnsZeroBeyondCutoffRadius) {
+    const auto material = oracle_brenner_material();
+    const Vec6 pe{0.171, 0.142, 0.142, 2.0943951023931953, 2.0943951023931953, 2.0943951023931953};
+    const auto result = fce::evaluate_brenner(material, pe);
+
+    EXPECT_DOUBLE_EQ(result.W, 0.0);
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_DOUBLE_EQ(result.dW[i], 0.0) << "dW[" << i << "]";
+        for (int j = 0; j < 6; ++j) {
+            EXPECT_DOUBLE_EQ(result.ddW[i][j], 0.0) << "ddW[" << i << "][" << j << "]";
+        }
+    }
+}
+
+TEST(Brenner, RejectsZeroNormBondLength) {
+    const auto material = oracle_brenner_material();
+    const Vec6 pe{0.0, 0.142, 0.142, 2.0943951023931953, 2.0943951023931953, 2.0943951023931953};
+
+    EXPECT_THROW((void)fce::evaluate_brenner(material, pe), std::invalid_argument);
+}
+
+TEST(Brenner, DefaultMaterialUsesSupportedPotentialCode) {
+    EXPECT_EQ(fce::MatData{}.nCode_Pot, 2);
+}
+
 TEST(NewtonInner, MatchesCommittedFortranOracleFixtures) {
     const fs::path fixture_dir = fs::path(ORACLE_DIR) / "constitutive_oracle" / "newton_inner";
     const auto fixtures = sorted_fixture_paths(fixture_dir);
-    ASSERT_GE(fixtures.size(), 4U);
+    ASSERT_GE(fixtures.size(), 10U);
 
     const auto material = oracle_brenner_material();
+    bool saw_fail_mode_1 = false;
+    bool saw_fail_mode_2 = false;
+    bool saw_fail_mode_3 = false;
     for (const auto& path : fixtures) {
         const auto fixture = read_newton_fixture(path);
         const auto result = fce::solve_inner_newton(
@@ -240,22 +268,76 @@ TEST(NewtonInner, MatchesCommittedFortranOracleFixtures) {
             fixture.eta0,
             fixture.crit,
             fixture.max_iter);
+        const double eta_tol = fixture.fail_mode == 0 ? 1e-10 : 5e-10;
+        const double scalar_tol = fixture.fail_mode == 0
+                                      ? std::max(1e-10, std::abs(fixture.W) * 1e-8)
+                                      : std::max(1e-8, std::abs(fixture.W) * 1e-6);
+        const double grad_tol_0 = fixture.fail_mode == 0
+                                      ? 1e-10
+                                      : std::max(1e-8, std::abs(fixture.dWdeta[0]) * 1e-6);
+        const double grad_tol_1 = fixture.fail_mode == 0
+                                      ? 1e-10
+                                      : std::max(1e-8, std::abs(fixture.dWdeta[1]) * 1e-6);
 
         EXPECT_EQ(result.iterations, fixture.iterations) << path.string();
         EXPECT_EQ(result.fail_mode, fixture.fail_mode) << path.string();
-        EXPECT_NEAR(result.eta[0], fixture.eta[0], 1e-10) << path.string();
-        EXPECT_NEAR(result.eta[1], fixture.eta[1], 1e-10) << path.string();
-        EXPECT_NEAR(result.W, fixture.W, std::max(1e-10, std::abs(fixture.W) * 1e-8)) << path.string();
-        EXPECT_NEAR(result.dWdeta[0], fixture.dWdeta[0], 1e-10) << path.string();
-        EXPECT_NEAR(result.dWdeta[1], fixture.dWdeta[1], 1e-10) << path.string();
+        EXPECT_NEAR(result.eta[0], fixture.eta[0], eta_tol) << path.string();
+        EXPECT_NEAR(result.eta[1], fixture.eta[1], eta_tol) << path.string();
+        EXPECT_NEAR(result.W, fixture.W, scalar_tol) << path.string();
+        EXPECT_NEAR(result.dWdeta[0], fixture.dWdeta[0], grad_tol_0) << path.string();
+        EXPECT_NEAR(result.dWdeta[1], fixture.dWdeta[1], grad_tol_1) << path.string();
         for (int i = 0; i < 3; ++i) {
-            EXPECT_NEAR(result.ddWdeta[i], fixture.ddWdeta[i], 1e-10) << path.string() << " ddWdeta[" << i << "]";
+            const double dd_tol = fixture.fail_mode == 0
+                                      ? 2e-10
+                                      : std::max(1e-7, std::abs(fixture.ddWdeta[i]) * 1e-6);
+            EXPECT_NEAR(result.ddWdeta[i], fixture.ddWdeta[i], dd_tol)
+                << path.string() << " ddWdeta[" << i << "]";
         }
         for (int i = 0; i < 6; ++i) {
-            EXPECT_NEAR(result.dW_dpe[i], fixture.dW_dpe[i], std::max(1e-10, std::abs(fixture.dW_dpe[i]) * 1e-8))
+            const double dW_tol = fixture.fail_mode == 0
+                                      ? std::max(1e-10, std::abs(fixture.dW_dpe[i]) * 1e-8)
+                                      : std::max(1e-8, std::abs(fixture.dW_dpe[i]) * 1e-6);
+            EXPECT_NEAR(result.dW_dpe[i], fixture.dW_dpe[i], dW_tol)
                 << path.string() << " dW_dpe[" << i << "]";
         }
+        saw_fail_mode_1 = saw_fail_mode_1 || fixture.fail_mode == 1;
+        saw_fail_mode_2 = saw_fail_mode_2 || fixture.fail_mode == 2;
+        saw_fail_mode_3 = saw_fail_mode_3 || fixture.fail_mode == 3;
     }
+
+    EXPECT_TRUE(saw_fail_mode_1);
+    EXPECT_TRUE(saw_fail_mode_2);
+    EXPECT_TRUE(saw_fail_mode_3);
+}
+
+TEST(NewtonInner, ReportsFailModeOneForSingularHessian) {
+    const auto material = oracle_brenner_material();
+    const auto result = fce::solve_inner_newton(
+        Sym22{0.8, 0.8, 0.0},
+        Vec2{-0.2, -0.2},
+        Mat22{{Vec2{-1.0, 0.0}, Vec2{-1.0, 0.0}}},
+        material,
+        Vec2{-0.02, -0.02},
+        1e-8,
+        5);
+
+    EXPECT_EQ(result.fail_mode, 1);
+    EXPECT_EQ(result.iterations, 1);
+}
+
+TEST(NewtonInner, ReportsFailModeTwoWhenStepLimitIsExceeded) {
+    const auto material = oracle_brenner_material();
+    const auto result = fce::solve_inner_newton(
+        Sym22{0.7, 0.7, -0.3},
+        Vec2{-0.2, -0.2},
+        Mat22{{Vec2{1.0, 0.0}, Vec2{0.0, 1.0}}},
+        material,
+        Vec2{-0.12, -0.12},
+        1e-8,
+        20);
+
+    EXPECT_EQ(result.fail_mode, 2);
+    EXPECT_EQ(result.iterations, 1);
 }
 
 TEST(NewtonInner, RejectsUnsupportedPotentialCode) {

@@ -15,7 +15,7 @@ used by the C++ unit tests for the translated Brenner potential and inner Newton
   - Inputs: six-component `pe = [a1, a2, a3, theta23, theta31, theta12]`
   - Outputs: Fortran `W`, `dW/dpe`, and a finite-difference Hessian row set derived from the
     frozen `Inner_Brenner` implementation
-- `newton_inner/case_01.dat` … `newton_inner/case_04.dat`
+- `newton_inner/case_01.dat` … `newton_inner/case_10.dat`
   - Inputs: `C_elem`, `curvppal`, `vppal`, initial `eta`, `crit`, `maxn`
   - Outputs: Fortran `newton_inner` iteration count, fail mode, converged `eta`, final
     `Hyper_pot_inner` energy, gradient, curvature Hessian, and `dW/dpe`
