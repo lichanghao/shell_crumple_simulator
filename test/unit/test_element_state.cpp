@@ -1,5 +1,6 @@
 #include "fce/element_state.hpp"
 #include "fce/constitutive.hpp"
+#include "fce/exponential.hpp"
 
 #include <gtest/gtest.h>
 
@@ -124,4 +125,75 @@ TEST(ElementState, RelaxedPipelineMatchesManualNewtonSolve) {
     EXPECT_NEAR(actual.inner.W, expected.W, tolerance(expected.W));
     EXPECT_EQ(actual.inner.iterations, expected.iterations);
     EXPECT_EQ(actual.inner.fail_mode, expected.fail_mode);
+}
+
+TEST(ElementState, BondPreparationMatchesManualComposition) {
+    const auto xneigh = curved_patch();
+    const auto dn = curved_dn();
+    const auto ddn = curved_ddn();
+    const Mat22 f0{{Vec2{0.9, 0.1}, Vec2{-0.2, 1.1}}};
+    const Vec2 eta{0.003, -0.002};
+    const auto material = oracle_brenner_material();
+    const auto state = fce::compute_element_state(xneigh, dn, ddn, f0);
+
+    const auto prepared = fce::prepare_bond_state(state, material, eta);
+    const auto prepared_with_derivatives = fce::prepare_bond_state_with_derivatives(state, material, eta);
+
+    std::array<double, 3> expected_a_norm{};
+    std::array<Vec2, 3> expected_ei{};
+    for (int ibond = 0; ibond < 3; ++ibond) {
+        expected_ei[ibond] = Vec2{
+            material.A0 * material.E[ibond][0] + eta[0],
+            material.A0 * material.E[ibond][1] + eta[1],
+        };
+        expected_a_norm[ibond] =
+            std::sqrt(expected_ei[ibond][0] * expected_ei[ibond][0] + expected_ei[ibond][1] * expected_ei[ibond][1]);
+        expected_ei[ibond][0] /= expected_a_norm[ibond];
+        expected_ei[ibond][1] /= expected_a_norm[ibond];
+    }
+
+    const auto expected_bonds =
+        fce::compute_deformed_bonds(state.C_elem, state.curvppal, state.vppal, expected_a_norm, expected_ei);
+    const auto expected_bonds_with_derivatives = fce::compute_deformed_bonds_with_derivatives(
+        state.C_elem,
+        state.curvppal,
+        state.vppal,
+        state.dcurvppaldC,
+        state.dcurvppaldk,
+        state.dvppaldC,
+        state.dvppaldk,
+        expected_a_norm,
+        expected_ei);
+
+    for (int ibond = 0; ibond < 3; ++ibond) {
+        EXPECT_NEAR(prepared.A_norm[ibond], expected_a_norm[ibond], tolerance(expected_a_norm[ibond])) << ibond;
+        EXPECT_NEAR(prepared_with_derivatives.A_norm[ibond], expected_a_norm[ibond], tolerance(expected_a_norm[ibond]))
+            << ibond;
+        for (int idim = 0; idim < 2; ++idim) {
+            EXPECT_NEAR(prepared.Ei[ibond][idim], expected_ei[ibond][idim], tolerance(expected_ei[ibond][idim]))
+                << ibond << ", " << idim;
+            EXPECT_NEAR(prepared_with_derivatives.Ei[ibond][idim],
+                        expected_ei[ibond][idim],
+                        tolerance(expected_ei[ibond][idim]))
+                << ibond << ", " << idim;
+        }
+    }
+
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_NEAR(prepared.bonds.pe[i], expected_bonds.pe[i], tolerance(expected_bonds.pe[i])) << i;
+        EXPECT_NEAR(prepared_with_derivatives.bonds.pe[i],
+                    expected_bonds_with_derivatives.pe[i],
+                    tolerance(expected_bonds_with_derivatives.pe[i]))
+            << i;
+        for (int j = 0; j < 3; ++j) {
+            EXPECT_NEAR(prepared_with_derivatives.bonds.dpedC[i][j],
+                        expected_bonds_with_derivatives.dpedC[i][j],
+                        tolerance(expected_bonds_with_derivatives.dpedC[i][j]))
+                << i << ", dC, " << j;
+            EXPECT_NEAR(prepared_with_derivatives.bonds.dpedk[i][j],
+                        expected_bonds_with_derivatives.dpedk[i][j],
+                        tolerance(expected_bonds_with_derivatives.dpedk[i][j]))
+                << i << ", dk, " << j;
+        }
+    }
 }

@@ -52,6 +52,16 @@ Vec2 operator/(const Vec2& a, const double s) {
     return Vec2{a[0] / s, a[1] / s};
 }
 
+ElementState make_element_state_view(const Voigt3& C_elem,
+                                     const Vec2& curvppal,
+                                     const Mat22& vppal) {
+    ElementState state;
+    state.C_elem = C_elem;
+    state.curvppal = curvppal;
+    state.vppal = vppal;
+    return state;
+}
+
 Voigt3 operator+(const Voigt3& a, const Voigt3& b) {
     return Voigt3{a[0] + b[0], a[1] + b[1], a[2] + b[2]};
 }
@@ -316,16 +326,9 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
         throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
     }
 
-    std::array<Vec2, 3> Ei{};
-    Vec3 A_norm{};
-    for (int ibond = 0; ibond < 3; ++ibond) {
-        Ei[ibond] = mat.A0 * mat.E[ibond] + eta;
-        A_norm[ibond] = norm(Ei[ibond]);
-        if (A_norm[ibond] <= 0.0) {
-            throw std::invalid_argument("Inner potential encountered zero-norm bond vector");
-        }
-        Ei[ibond] = Ei[ibond] / A_norm[ibond];
-    }
+    const PreparedBondState prepared = prepare_bond_state(make_element_state_view(C_elem, curvppal, vppal), mat, eta);
+    const auto& Ei = prepared.Ei;
+    const auto& A_norm = prepared.A_norm;
 
     const Vec2 ttemp1{
         C_elem[0] * vppal[0][0] + C_elem[2] * vppal[0][1],
@@ -346,7 +349,7 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
     std::array<Vec2, 6> dpedeta_all{};
     std::array<Voigt3, 6> ddpedeta{};
     Vec6 pe{};
-    const BondState bond_state = compute_deformed_bonds(C_elem, curvppal, vppal, A_norm, Ei);
+    const BondState& bond_state = prepared.bonds;
 
     for (int i = 0; i < 3; ++i) {
         const Vec2 ttemp = c_vec(C_elem, Ei[i]);
@@ -569,7 +572,75 @@ NewtonInnerOutput solve_inner_newton(const ElementState& state,
                                      const Vec2& eta0,
                                      const double crit,
                                      const int max_iter) {
-    return solve_inner_newton(state.C_elem, state.curvppal, state.vppal, mat, eta0, crit, max_iter);
+    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
+        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
+    }
+
+    NewtonInnerOutput out;
+    out.eta = eta0;
+    out.iterations = 0;
+    out.fail_mode = 0;
+
+    InnerPotentialOutput current = evaluate_inner_potential(state, mat, out.eta);
+    double test = crit * (1.0 + std::abs(current.W));
+    double gnorm = norm(current.dWdeta);
+
+    if (gnorm <= test) {
+        out.W = current.W;
+        out.dWdeta = current.dWdeta;
+        out.ddWdeta = current.ddWdeta;
+        out.dW_dpe = current.dW_dpe;
+        return out;
+    }
+
+    while (gnorm > test && out.iterations < max_iter) {
+        ++out.iterations;
+        const double det = current.ddWdeta[0] * current.ddWdeta[1] -
+                           current.ddWdeta[2] * current.ddWdeta[2];
+
+        if (std::abs(det) < 1e-15) {
+            if (gnorm <= test * 10.0) {
+                break;
+            }
+            out.fail_mode = 1;
+            break;
+        }
+
+        Vec2 dx{
+            (current.dWdeta[1] * current.ddWdeta[2] -
+             current.dWdeta[0] * current.ddWdeta[1]) /
+                det,
+            (current.dWdeta[0] * current.ddWdeta[2] -
+             current.dWdeta[1] * current.ddWdeta[0]) /
+                det,
+        };
+
+        const double step_len = norm(dx);
+        if (step_len > 0.1 * mat.A0) {
+            dx = dx * (0.1 * mat.A0 / step_len);
+        }
+
+        out.eta = out.eta + dx;
+        if (norm(out.eta) > 0.5 * mat.A0) {
+            out.fail_mode = 2;
+            break;
+        }
+
+        current = evaluate_inner_potential(state, mat, out.eta);
+        test = crit * (1.0 + std::abs(current.W));
+        gnorm = norm(current.dWdeta);
+    }
+
+    if (gnorm > test && out.fail_mode == 0) {
+        out.fail_mode = 3;
+    }
+
+    current = evaluate_inner_potential(state, mat, out.eta);
+    out.W = current.W;
+    out.dWdeta = current.dWdeta;
+    out.ddWdeta = current.ddWdeta;
+    out.dW_dpe = current.dW_dpe;
+    return out;
 }
 
 }  // namespace fce

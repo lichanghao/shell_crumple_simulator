@@ -1,10 +1,34 @@
 #include "fce/element_state.hpp"
 
+#include <cmath>
+#include <stdexcept>
+
 namespace fce {
 namespace {
 
 Voigt3 subtract_voigt(const Voigt3& a, const Voigt3& b) {
     return Voigt3{a[0] - b[0], a[1] - b[1], a[2] - b[2]};
+}
+
+std::array<Vec2, 3> compute_normalized_bonds(const MatData& mat,
+                                             const Vec2& eta,
+                                             std::array<double, 3>* a_norm) {
+    std::array<Vec2, 3> Ei{};
+    for (int ibond = 0; ibond < 3; ++ibond) {
+        Ei[ibond] = Vec2{
+            mat.A0 * mat.E[ibond][0] + eta[0],
+            mat.A0 * mat.E[ibond][1] + eta[1],
+        };
+        const double norm =
+            std::sqrt(Ei[ibond][0] * Ei[ibond][0] + Ei[ibond][1] * Ei[ibond][1]);
+        if (norm <= 0.0) {
+            throw std::invalid_argument("bond preparation encountered zero-norm bond vector");
+        }
+        (*a_norm)[ibond] = norm;
+        Ei[ibond][0] /= norm;
+        Ei[ibond][1] /= norm;
+    }
+    return Ei;
 }
 
 }  // namespace
@@ -28,6 +52,33 @@ ElementState compute_element_state(const NeighborCoords12& xneigh,
     out.dvppaldC = principal.dvppaldC;
     out.dvppaldk = principal.dvppaldk;
     out.flag_num_diff = principal.flag_num_diff;
+    return out;
+}
+
+PreparedBondState prepare_bond_state(const ElementState& state,
+                                     const MatData& mat,
+                                     const Vec2& eta) {
+    PreparedBondState out;
+    out.Ei = compute_normalized_bonds(mat, eta, &out.A_norm);
+    out.bonds = compute_deformed_bonds(state.C_elem, state.curvppal, state.vppal, out.A_norm, out.Ei);
+    return out;
+}
+
+PreparedBondStateWithDerivatives prepare_bond_state_with_derivatives(const ElementState& state,
+                                                                     const MatData& mat,
+                                                                     const Vec2& eta) {
+    PreparedBondStateWithDerivatives out;
+    out.Ei = compute_normalized_bonds(mat, eta, &out.A_norm);
+    out.bonds = compute_deformed_bonds_with_derivatives(
+        state.C_elem,
+        state.curvppal,
+        state.vppal,
+        state.dcurvppaldC,
+        state.dcurvppaldk,
+        state.dvppaldC,
+        state.dvppaldk,
+        out.A_norm,
+        out.Ei);
     return out;
 }
 
