@@ -169,10 +169,23 @@ GeneralData read_general(const std::string& path) {
     g.ylength          = r.read_double();
     g.mat.A0           = r.read_double();
     g.mat.nCode_Pot    = r.read_int();
-    // 4 Brenner params (C0..C3) — read but not stored in MatData (internal use)
-    double bparams[4];
-    for (double& p : bparams) p = r.read_double();
-    (void)bparams;
+    if (g.mat.nCode_Pot == 1) {
+        g.mat.Vs[0] = r.read_double();
+        g.mat.Vs[1] = r.read_double();
+        g.mat.Va[0] = r.read_double();
+        g.mat.Va[1] = r.read_double();
+    } else if (g.mat.nCode_Pot == 2) {
+        g.mat.A1 = r.read_double();
+        g.mat.Vs[0] = r.read_double();
+        g.mat.Vs[1] = r.read_double();
+        g.mat.Vs[2] = r.read_double();
+        g.mat.Va[0] = r.read_double();
+        g.mat.Va[1] = r.read_double();
+        g.mat.Va[2] = r.read_double();
+    } else if (g.mat.nCode_Pot == 3) {
+        g.mat.Vs[0] = r.read_double();
+        g.mat.Va[0] = r.read_double();
+    }
     // Bond vectors E1, E2, E3 (3 rows × 2 columns)
     for (int i = 0; i < 3; ++i) {
         auto toks = r.read_tokens();
@@ -196,11 +209,23 @@ void write_general(const std::string& path, const GeneralData& g) {
     f << " ylength\n"     << fmt_d(g.ylength)    << "\n";
     f << " mat1%A0\n"     << fmt_d(g.mat.A0)     << "\n";
     f << " mat1%nCode_Pot\n" << std::setw(9) << g.mat.nCode_Pot << "\n";
-    // Brenner REBO C0..C3 (hard-coded from Fortran prepro)
-    f << fmt_d(0.603105008602142330) << "\n";
-    f << fmt_d(26.25000000000000000) << "\n";
-    f << fmt_d(0.8999999761581421) << "\n";
-    f << fmt_d(0.7540000081062317) << "\n";
+    if (g.mat.nCode_Pot == 1) {
+        f << fmt_d(g.mat.Vs[0]) << "\n";
+        f << fmt_d(g.mat.Vs[1]) << "\n";
+        f << fmt_d(g.mat.Va[0]) << "\n";
+        f << fmt_d(g.mat.Va[1]) << "\n";
+    } else if (g.mat.nCode_Pot == 2) {
+        f << fmt_d(g.mat.A1) << "\n";
+        f << fmt_d(g.mat.Vs[0]) << "\n";
+        f << fmt_d(g.mat.Vs[1]) << "\n";
+        f << fmt_d(g.mat.Vs[2]) << "\n";
+        f << fmt_d(g.mat.Va[0]) << "\n";
+        f << fmt_d(g.mat.Va[1]) << "\n";
+        f << fmt_d(g.mat.Va[2]) << "\n";
+    } else if (g.mat.nCode_Pot == 3) {
+        f << fmt_d(g.mat.Vs[0]) << "\n";
+        f << fmt_d(g.mat.Va[0]) << "\n";
+    }
     f << " mat1%E\n";
     for (int i = 0; i < 3; ++i) {
         f << fmt_d(g.mat.E[i][0]) << fmt_d(g.mat.E[i][1]) << "\n";

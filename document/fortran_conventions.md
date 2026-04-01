@@ -78,8 +78,10 @@ Material properties, potential parameters, and solver settings.
  ------------
  ylength              → sheet circumferential/width length (real, nm)
  mat1%A0              → equilibrium C-C bond length (real, nm, e.g. 0.142)
- mat1%nCode_Pot       → potential code (integer; 1=Brenner REBO)
- [4 Brenner params]   → 4 reals: C0, C1, C2, C3 (potential fitting parameters)
+ mat1%nCode_Pot       → potential code (integer; 1=Morse, 2=Brenner REBO, 22=Brenner2, 3=MM3)
+ [code=1 params]      → 4 reals: Vs(1), Vs(2), Va(1), Va(2) for the Morse path
+ [code=2 params]      → 7 reals: A1, Vs(1:3), Va(1:3) for the Brenner path
+ [code=3 params]      → 2 reals: Vs(1), Va(1) for MM3
  mat1%E               → 3 bond vectors E1, E2, E3 (3 rows × 2 columns, reals)
  mat1%s0              → reference unit cell area (real, nm²)
  nW_hat               → inner relaxation flag (integer; 1=yes, 0=no)

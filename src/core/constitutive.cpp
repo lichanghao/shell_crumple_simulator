@@ -94,6 +94,15 @@ void validate_brenner_material(const MatData& mat) {
     }
 }
 
+void validate_morse_material(const MatData& mat) {
+    if (mat.s0 == 0.0 || mat.A0 == 0.0) {
+        throw std::invalid_argument("Morse material requires nonzero A0 and s0");
+    }
+    if (mat.Vs[0] <= 0.0 || mat.Vs[1] <= 0.0 || mat.Va[0] <= 0.0) {
+        throw std::invalid_argument("Morse material requires positive Vs(1:2) and Va(1)");
+    }
+}
+
 std::array<Vec3, 3> gang_bis(const Vec3& theta, const MatData& mat) {
     std::array<Vec3, 3> ga{};
     for (int i = 0; i < 3; ++i) {
@@ -129,6 +138,28 @@ Vec3 vatt_bis(const double a, const MatData& mat) {
     return Vec3{v0, -v0 * aux, v0 * aux * aux};
 }
 
+Vec3 vstretch_bis(const double a, const MatData& mat) {
+    const double ex = std::exp(-mat.Vs[1] * (a - mat.A0));
+    const double stretch = 1.0 - ex;
+    return Vec3{
+        mat.Vs[0] * stretch * stretch,
+        mat.Vs[0] * 2.0 * mat.Vs[1] * ex * stretch,
+        mat.Vs[0] * 2.0 * mat.Vs[1] * mat.Vs[1] * (ex * ex - ex * stretch),
+    };
+}
+
+Vec3 vangle_bis(const double ang, const MatData& mat) {
+    constexpr double kAngle0 = 2.0 * 3.14159265358979323846 / 3.0;
+    const double t1 = ang - kAngle0;
+    const double t2 = t1 * t1;
+    const double t4 = t2 * t2;
+    return Vec3{
+        mat.Va[0] * 0.5 * t2 * (1.0 + mat.Va[1] * t4),
+        mat.Va[0] * t1 * (1.0 + 3.0 * mat.Va[1] * t4),
+        mat.Va[0] * (1.0 + 15.0 * mat.Va[1] * t4),
+    };
+}
+
 struct InnerBrennerEtaOutput {
     double W{0.0};
     Vec2 dWdeta{};
@@ -136,6 +167,49 @@ struct InnerBrennerEtaOutput {
     Vec6 dW{};
     Mat66 ddW{};
 };
+
+struct InnerMorseEtaOutput {
+    double W{0.0};
+    Vec2 dWdeta{};
+    Voigt3 ddWdeta{};
+    Vec6 dW{};
+};
+
+InnerMorseEtaOutput evaluate_inner_morse(const MatData& mat,
+                                         const Vec6& pe,
+                                         const std::array<Vec2, 6>& dpedeta,
+                                         const std::array<Voigt3, 6>& ddpedeta) {
+    validate_morse_material(mat);
+
+    InnerMorseEtaOutput out;
+    for (int i = 0; i < 3; ++i) {
+        const Vec3 vs = vstretch_bis(pe[i], mat);
+        out.W += vs[0];
+        out.dW[i] = vs[1] / mat.s0;
+        out.dWdeta = out.dWdeta + out.dW[i] * dpedeta[i];
+        out.ddWdeta = out.ddWdeta +
+                      (vs[2] / mat.s0) * Voigt3{
+                                              dpedeta[i][0] * dpedeta[i][0],
+                                              dpedeta[i][1] * dpedeta[i][1],
+                                              dpedeta[i][0] * dpedeta[i][1],
+                                          } +
+                      out.dW[i] * ddpedeta[i];
+
+        const Vec3 va = vangle_bis(pe[3 + i], mat);
+        out.W += 2.0 * va[0];
+        out.dW[3 + i] = 2.0 * va[1] / mat.s0;
+        out.dWdeta = out.dWdeta + out.dW[3 + i] * dpedeta[3 + i];
+        out.ddWdeta = out.ddWdeta +
+                      (2.0 * va[2] / mat.s0) * Voigt3{
+                                                  dpedeta[3 + i][0] * dpedeta[3 + i][0],
+                                                  dpedeta[3 + i][1] * dpedeta[3 + i][1],
+                                                  dpedeta[3 + i][0] * dpedeta[3 + i][1],
+                                              } +
+                      out.dW[3 + i] * ddpedeta[3 + i];
+    }
+    out.W /= mat.s0;
+    return out;
+}
 
 InnerBrennerEtaOutput evaluate_inner_brenner(const MatData& mat,
                                              const Vec6& pe,
@@ -240,8 +314,8 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
                                               const Mat22& vppal,
                                               const MatData& mat,
                                               const Vec2& eta) {
-    if (mat.nCode_Pot != 2) {
-        throw std::invalid_argument("Only Brenner nCode_Pot=2 is supported");
+    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
+        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
     }
 
     std::array<Vec2, 3> Ei{};
@@ -392,13 +466,20 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
         ddpedeta[3 + k] = (-1.0 / sin_theta) * (temp7 * aux3 + aux2);
     }
 
-    const InnerBrennerEtaOutput inner = evaluate_inner_brenner(mat, pe, dpedeta_all, ddpedeta);
-
     InnerPotentialOutput out;
-    out.W = inner.W;
-    out.dWdeta = inner.dWdeta;
-    out.ddWdeta = inner.ddWdeta;
-    out.dW_dpe = inner.dW;
+    if (mat.nCode_Pot == 1) {
+        const InnerMorseEtaOutput inner = evaluate_inner_morse(mat, pe, dpedeta_all, ddpedeta);
+        out.W = inner.W;
+        out.dWdeta = inner.dWdeta;
+        out.ddWdeta = inner.ddWdeta;
+        out.dW_dpe = inner.dW;
+    } else {
+        const InnerBrennerEtaOutput inner = evaluate_inner_brenner(mat, pe, dpedeta_all, ddpedeta);
+        out.W = inner.W;
+        out.dWdeta = inner.dWdeta;
+        out.ddWdeta = inner.ddWdeta;
+        out.dW_dpe = inner.dW;
+    }
     return out;
 }
 
@@ -409,8 +490,8 @@ NewtonInnerOutput solve_inner_newton(const Voigt3& C_elem,
                                      const Vec2& eta0,
                                      const double crit,
                                      const int max_iter) {
-    if (mat.nCode_Pot != 2) {
-        throw std::invalid_argument("Only Brenner nCode_Pot=2 is supported");
+    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
+        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
     }
 
     NewtonInnerOutput out;

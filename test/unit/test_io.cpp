@@ -70,6 +70,10 @@ TEST(ReadGeneral, GrapheneCompression) {
     EXPECT_NEAR(g.ylength,    20.0, 1e-10);
     EXPECT_NEAR(g.mat.A0,    0.142, 1e-12);
     EXPECT_EQ  (g.mat.nCode_Pot, 1);
+    EXPECT_NEAR(g.mat.Vs[0], 0.60310500860214233, 1e-15);
+    EXPECT_NEAR(g.mat.Vs[1], 26.25, 1e-12);
+    EXPECT_NEAR(g.mat.Va[0], 0.89999997615814209, 1e-12);
+    EXPECT_NEAR(g.mat.Va[1], 0.75400000810623169, 1e-15);
     // Bond vector E1 (armchair orientation)
     EXPECT_NEAR(g.mat.E[0][0],  0.8660254037844387, 1e-12);
     EXPECT_NEAR(g.mat.E[0][1],  0.4999999999999999, 1e-12);

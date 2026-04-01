@@ -1,4 +1,5 @@
 #include "fce/constitutive.hpp"
+#include "fce/io.hpp"
 
 #include <gtest/gtest.h>
 
@@ -246,7 +247,7 @@ TEST(Brenner, RejectsZeroNormBondLength) {
 }
 
 TEST(Brenner, DefaultMaterialUsesSupportedPotentialCode) {
-    EXPECT_EQ(fce::MatData{}.nCode_Pot, 2);
+    EXPECT_EQ(fce::MatData{}.nCode_Pot, 1);
 }
 
 TEST(NewtonInner, MatchesCommittedFortranOracleFixtures) {
@@ -342,7 +343,7 @@ TEST(NewtonInner, ReportsFailModeTwoWhenStepLimitIsExceeded) {
 
 TEST(NewtonInner, RejectsUnsupportedPotentialCode) {
     auto material = oracle_brenner_material();
-    material.nCode_Pot = 1;
+    material.nCode_Pot = 99;
 
     EXPECT_THROW(
         (void)fce::solve_inner_newton(
@@ -354,4 +355,24 @@ TEST(NewtonInner, RejectsUnsupportedPotentialCode) {
             1e-8,
             5),
         std::invalid_argument);
+}
+
+TEST(NewtonInner, AcceptsCommittedCompressionMaterialPayload) {
+    const auto general =
+        fce::io::read_general((fs::path(ORACLE_DIR) / "graphene_compression_prepro" / "nano_general.dat").string());
+
+    const auto result = fce::solve_inner_newton(
+        Sym22{1.0, 1.0, 0.0},
+        Vec2{0.0, 0.0},
+        Mat22{{Vec2{1.0, 0.0}, Vec2{0.0, 1.0}}},
+        general.mat,
+        Vec2{0.0, 0.0},
+        1e-8,
+        8);
+
+    EXPECT_EQ(result.fail_mode, 0);
+    EXPECT_EQ(result.iterations, 0);
+    EXPECT_NEAR(result.W, 0.0, 1e-12);
+    EXPECT_NEAR(result.dWdeta[0], 0.0, 1e-12);
+    EXPECT_NEAR(result.dWdeta[1], 0.0, 1e-12);
 }
