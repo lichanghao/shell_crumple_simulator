@@ -11,10 +11,6 @@ Voigt3 operator*(double s, const Voigt3& a) {
     return Voigt3{s * a[0], s * a[1], s * a[2]};
 }
 
-Voigt3 operator+(const Voigt3& a, const Voigt3& b) {
-    return Voigt3{a[0] + b[0], a[1] + b[1], a[2] + b[2]};
-}
-
 Voigt3 operator-(const Voigt3& a, const Voigt3& b) {
     return Voigt3{a[0] - b[0], a[1] - b[1], a[2] - b[2]};
 }
@@ -37,6 +33,13 @@ PrincipalResult compute_principal_curvature(const Voigt3& C_elem, const Voigt3& 
     const double xmean = alpha / (2.0 * detC);
     const double gauss = detk0 / detC;
     const double beta_sq = xmean * xmean - gauss;
+    if (!std::isfinite(beta_sq)) {
+        throw std::invalid_argument("principal encountered non-finite curvature discriminant");
+    }
+    const double beta_scale = std::max({1.0, std::abs(xmean * xmean), std::abs(gauss)});
+    if (beta_sq < -1e-12 * beta_scale) {
+        throw std::invalid_argument("principal encountered negative curvature discriminant");
+    }
     const double beta = std::sqrt(std::max(0.0, beta_sq));
 
     out.curvppal = Vec2{xmean + beta, xmean - beta};

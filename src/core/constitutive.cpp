@@ -1,5 +1,6 @@
 #include "fce/constitutive.hpp"
 
+#include "fce/exponential.hpp"
 #include "fce/taylor.hpp"
 
 #include <algorithm>
@@ -27,10 +28,6 @@ double dot(const Vec3& a, const Vec3& b) {
 }
 
 double norm(const Vec2& a) {
-    return std::sqrt(dot(a, a));
-}
-
-double norm(const Vec3& a) {
     return std::sqrt(dot(a, a));
 }
 
@@ -348,6 +345,7 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
     std::array<Vec2, 6> dpedeta_all{};
     std::array<Voigt3, 6> ddpedeta{};
     Vec6 pe{};
+    const BondState bond_state = compute_deformed_bonds(C_elem, curvppal, vppal, A_norm, Ei);
 
     for (int i = 0; i < 3; ++i) {
         const Vec2 ttemp = c_vec(C_elem, Ei[i]);
@@ -391,10 +389,7 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
             curvppal[0] * (xx1 * xx1 + yy1 * (g12 + curvppal[0] * p / 4.0 * h12)) * dpdeta2 +
             curvppal[1] * (xx2 * xx2 + yy2 * (g22 + curvppal[1] * q / 4.0 * h22)) * dqdeta2;
 
-        pe[i] = norm(a_def[i]);
-        if (pe[i] <= 0.0) {
-            throw std::invalid_argument("Inner potential encountered zero bond deformation norm");
-        }
+        pe[i] = bond_state.pe[i];
         dpedeta_all[i] =
             (a_def[i][0] * dadeta[i][0] + a_def[i][1] * dadeta[i][1] + a_def[i][2] * dadeta[i][2]) / pe[i];
 
@@ -419,8 +414,8 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
         const int i = kBondPermutations[k][0];
         const int j = kBondPermutations[k][1];
         const double temp6 = dot(a_def[i], a_def[j]);
-        const double temp7 = std::clamp(temp6 / (pe[i] * pe[j]), -1.0, 1.0);
-        pe[3 + k] = std::acos(temp7);
+        pe[3 + k] = bond_state.pe[3 + k];
+        const double temp7 = std::cos(pe[3 + k]);
         const double sin_theta = std::sin(pe[3 + k]);
         if (std::abs(sin_theta) < 1e-15) {
             throw std::invalid_argument("Inner potential encountered singular bond angle derivative");
