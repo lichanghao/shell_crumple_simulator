@@ -197,3 +197,50 @@ TEST(ElementState, BondPreparationMatchesManualComposition) {
         }
     }
 }
+
+TEST(ElementState, CanonicalStateOwnsPreparedBondStage) {
+    const auto xneigh = curved_patch();
+    const auto dn = curved_dn();
+    const auto ddn = curved_ddn();
+    const Mat22 f0{{Vec2{0.9, 0.1}, Vec2{-0.2, 1.1}}};
+    const Vec2 eta{0.003, -0.002};
+    const auto material = oracle_brenner_material();
+    const auto state = fce::compute_element_state(xneigh, dn, ddn, f0);
+
+    const auto prepared_state = fce::prepare_element_state(state, material, eta);
+    const auto expected = fce::prepare_bond_state_with_derivatives(state, material, eta);
+
+    EXPECT_TRUE(prepared_state.has_prepared_bond_state);
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_NEAR(prepared_state.prepared_eta[i], eta[i], tolerance(eta[i])) << i;
+    }
+    for (int ibond = 0; ibond < 3; ++ibond) {
+        EXPECT_NEAR(prepared_state.prepared_bonds.A_norm[ibond],
+                    expected.A_norm[ibond],
+                    tolerance(expected.A_norm[ibond]))
+            << ibond;
+        for (int idim = 0; idim < 2; ++idim) {
+            EXPECT_NEAR(prepared_state.prepared_bonds.Ei[ibond][idim],
+                        expected.Ei[ibond][idim],
+                        tolerance(expected.Ei[ibond][idim]))
+                << ibond << ", " << idim;
+        }
+    }
+
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_NEAR(prepared_state.prepared_bonds.bonds.pe[i],
+                    expected.bonds.pe[i],
+                    tolerance(expected.bonds.pe[i]))
+            << i;
+        for (int j = 0; j < 3; ++j) {
+            EXPECT_NEAR(prepared_state.prepared_bonds.bonds_with_derivatives.dpedC[i][j],
+                        expected.bonds.dpedC[i][j],
+                        tolerance(expected.bonds.dpedC[i][j]))
+                << i << ", dC, " << j;
+            EXPECT_NEAR(prepared_state.prepared_bonds.bonds_with_derivatives.dpedk[i][j],
+                        expected.bonds.dpedk[i][j],
+                        tolerance(expected.bonds.dpedk[i][j]))
+                << i << ", dk, " << j;
+        }
+    }
+}

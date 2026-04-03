@@ -62,6 +62,24 @@ ElementState make_element_state_view(const Voigt3& C_elem,
     return state;
 }
 
+bool has_matching_prepared_bond_state(const ElementState& state,
+                                      const MatData& mat,
+                                      const Vec2& eta) {
+    return state.has_prepared_bond_state &&
+           state.prepared_eta == eta &&
+           state.prepared_material_A0 == mat.A0 &&
+           state.prepared_material_E == mat.E;
+}
+
+ElementState ensure_prepared_element_state(const ElementState& state,
+                                           const MatData& mat,
+                                           const Vec2& eta) {
+    if (has_matching_prepared_bond_state(state, mat, eta)) {
+        return state;
+    }
+    return prepare_element_state(state, mat, eta);
+}
+
 Voigt3 operator+(const Voigt3& a, const Voigt3& b) {
     return Voigt3{a[0] + b[0], a[1] + b[1], a[2] + b[2]};
 }
@@ -249,94 +267,24 @@ InnerBrennerEtaOutput evaluate_inner_brenner(const MatData& mat,
     return out;
 }
 
-}  // namespace
-
-BrennerOutput evaluate_brenner(const MatData& mat, const Vec6& pe) {
-    validate_brenner_material(mat);
-    for (int i = 0; i < 3; ++i) {
-        if (pe[i] <= 0.0) {
-            throw std::invalid_argument("Brenner bond lengths must be positive");
-        }
+InnerPotentialOutput evaluate_inner_potential_from_prepared_state(const ElementState& state,
+                                                                  const MatData& mat) {
+    if (!state.has_prepared_bond_state) {
+        throw std::invalid_argument("ElementState must own a prepared bond stage before evaluation");
     }
 
-    BrennerOutput out;
-    if (std::any_of(pe.begin(), pe.begin() + 3, [](double a) {
-            return a >= kBrennerCutoffRadius;
-        })) {
-        return out;
-    }
-
-    const Vec3 theta{pe[3], pe[4], pe[5]};
-    const auto ga = gang_bis(theta, mat);
-
-    for (int ibond = 0; ibond < 3; ++ibond) {
-        const int ip1 = kBondPermutations[ibond][0];
-        const int ip2 = kBondPermutations[ibond][1];
-        const double fang =
-            1.0 / std::sqrt(1.0 + ga[0][ip1] + ga[0][ip2]);
-        const Vec3 vr = vrep_bis(pe[ibond], mat);
-        const Vec3 va = vatt_bis(pe[ibond], mat);
-
-        out.W += vr[0] - fang * va[0];
-        out.dW[ibond] = vr[1] - fang * va[1];
-        out.dW[3 + ip1] += va[0] * std::pow(fang, 3.0) * ga[1][ip1] / 2.0;
-        out.dW[3 + ip2] += va[0] * std::pow(fang, 3.0) * ga[1][ip2] / 2.0;
-
-        out.ddW[ibond][ibond] = vr[2] - fang * va[2];
-        out.ddW[3 + ip1][3 + ip1] +=
-            ga[2][ip1] / 2.0 * va[0] * std::pow(fang, 3.0) -
-            0.75 * ga[1][ip1] * ga[1][ip1] * va[0] * std::pow(fang, 5.0);
-        out.ddW[3 + ip2][3 + ip2] +=
-            ga[2][ip2] / 2.0 * va[0] * std::pow(fang, 3.0) -
-            0.75 * ga[1][ip2] * ga[1][ip2] * va[0] * std::pow(fang, 5.0);
-        out.ddW[ibond][3 + ip1] = va[1] * std::pow(fang, 3.0) * ga[1][ip1] / 2.0;
-        out.ddW[ibond][3 + ip2] = va[1] * std::pow(fang, 3.0) * ga[1][ip2] / 2.0;
-        out.ddW[3 + ip1][3 + ip2] =
-            -0.75 * va[0] * std::pow(fang, 5.0) * ga[1][ip1] * ga[1][ip2];
-    }
-
-    for (int i = 0; i < 6; ++i) {
-        for (int j = i + 1; j < 6; ++j) {
-            if (out.ddW[i][j] == 0.0 && out.ddW[j][i] != 0.0) {
-                out.ddW[i][j] = out.ddW[j][i];
-            } else {
-                out.ddW[j][i] = out.ddW[i][j];
-            }
-        }
-    }
-
-    out.W /= mat.s0;
-    for (double& value : out.dW) {
-        value /= mat.s0;
-    }
-    for (auto& row : out.ddW) {
-        for (double& value : row) {
-            value /= mat.s0;
-        }
-    }
-    return out;
-}
-
-InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
-                                              const Vec2& curvppal,
-                                              const Mat22& vppal,
-                                              const MatData& mat,
-                                              const Vec2& eta) {
-    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
-        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
-    }
-
-    const PreparedBondState prepared = prepare_bond_state(make_element_state_view(C_elem, curvppal, vppal), mat, eta);
-    const auto& Ei = prepared.Ei;
+    const auto& prepared = state.prepared_bonds;
     const auto& A_norm = prepared.A_norm;
+    const auto& Ei = prepared.Ei;
+    const BondState& bond_state = prepared.bonds;
 
     const Vec2 ttemp1{
-        C_elem[0] * vppal[0][0] + C_elem[2] * vppal[0][1],
-        C_elem[2] * vppal[0][0] + C_elem[1] * vppal[0][1],
+        state.C_elem[0] * state.vppal[0][0] + state.C_elem[2] * state.vppal[0][1],
+        state.C_elem[2] * state.vppal[0][0] + state.C_elem[1] * state.vppal[0][1],
     };
     const Vec2 ttemp2{
-        C_elem[0] * vppal[1][0] + C_elem[2] * vppal[1][1],
-        C_elem[2] * vppal[1][0] + C_elem[1] * vppal[1][1],
+        state.C_elem[0] * state.vppal[1][0] + state.C_elem[2] * state.vppal[1][1],
+        state.C_elem[2] * state.vppal[1][0] + state.C_elem[1] * state.vppal[1][1],
     };
     const Vec2 dpdeta = ttemp1;
     const Vec2 dqdeta = ttemp2;
@@ -349,49 +297,48 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
     std::array<Vec2, 6> dpedeta_all{};
     std::array<Voigt3, 6> ddpedeta{};
     Vec6 pe{};
-    const BondState& bond_state = prepared.bonds;
 
     for (int i = 0; i < 3; ++i) {
-        const Vec2 ttemp = c_vec(C_elem, Ei[i]);
-        const double temp3 = dot(vppal[0], ttemp);
-        const double temp4 = dot(vppal[1], ttemp);
+        const Vec2 ttemp = c_vec(state.C_elem, Ei[i]);
+        const double temp3 = dot(state.vppal[0], ttemp);
+        const double temp4 = dot(state.vppal[1], ttemp);
         const double p = A_norm[i] * temp3;
         const double q = A_norm[i] * temp4;
 
-        const double f1 = sinxx(curvppal[0] * p);
-        const double f2 = sinxx(curvppal[1] * q);
-        const double f12 = sinxx(curvppal[0] * p / 2.0);
-        const double f22 = sinxx(curvppal[1] * q / 2.0);
+        const double f1 = sinxx(state.curvppal[0] * p);
+        const double f2 = sinxx(state.curvppal[1] * q);
+        const double f12 = sinxx(state.curvppal[0] * p / 2.0);
+        const double f22 = sinxx(state.curvppal[1] * q / 2.0);
 
         a_def[i][0] = p * f1;
         a_def[i][1] = q * f2;
-        a_def[i][2] = curvppal[0] * p * p / 2.0 * f12 * f12 +
-                      curvppal[1] * q * q / 2.0 * f22 * f22;
+        a_def[i][2] = state.curvppal[0] * p * p / 2.0 * f12 * f12 +
+                      state.curvppal[1] * q * q / 2.0 * f22 * f22;
 
-        const double g1 = dsinxx(curvppal[0] * p);
-        const double g2 = dsinxx(curvppal[1] * q);
-        const double g12 = dsinxx(curvppal[0] * p / 2.0);
-        const double g22 = dsinxx(curvppal[1] * q / 2.0);
+        const double g1 = dsinxx(state.curvppal[0] * p);
+        const double g2 = dsinxx(state.curvppal[1] * q);
+        const double g12 = dsinxx(state.curvppal[0] * p / 2.0);
+        const double g22 = dsinxx(state.curvppal[1] * q / 2.0);
 
-        dadeta[i][0] = (f1 + curvppal[0] * p * g1) * dpdeta;
-        dadeta[i][1] = (f2 + curvppal[1] * q * g2) * dqdeta;
+        dadeta[i][0] = (f1 + state.curvppal[0] * p * g1) * dpdeta;
+        dadeta[i][1] = (f2 + state.curvppal[1] * q * g2) * dqdeta;
 
-        const double xx1 = f12 + curvppal[0] * p / 2.0 * g12;
-        const double xx2 = f22 + curvppal[1] * q / 2.0 * g22;
-        const double yy1 = curvppal[0] * p * f12;
-        const double yy2 = curvppal[1] * q * f22;
+        const double xx1 = f12 + state.curvppal[0] * p / 2.0 * g12;
+        const double xx2 = f22 + state.curvppal[1] * q / 2.0 * g22;
+        const double yy1 = state.curvppal[0] * p * f12;
+        const double yy2 = state.curvppal[1] * q * f22;
         dadeta[i][2] = yy1 * xx1 * dpdeta + yy2 * xx2 * dqdeta;
 
-        const double h1 = ddsinxx(curvppal[0] * p);
-        const double h2 = ddsinxx(curvppal[1] * q);
-        const double h12 = ddsinxx(curvppal[0] * p / 2.0);
-        const double h22 = ddsinxx(curvppal[1] * q / 2.0);
+        const double h1 = ddsinxx(state.curvppal[0] * p);
+        const double h2 = ddsinxx(state.curvppal[1] * q);
+        const double h12 = ddsinxx(state.curvppal[0] * p / 2.0);
+        const double h22 = ddsinxx(state.curvppal[1] * q / 2.0);
 
-        ddadeta[i][0] = curvppal[0] * (2.0 * g1 + curvppal[0] * p * h1) * dpdeta2;
-        ddadeta[i][1] = curvppal[1] * (2.0 * g2 + curvppal[1] * q * h2) * dqdeta2;
+        ddadeta[i][0] = state.curvppal[0] * (2.0 * g1 + state.curvppal[0] * p * h1) * dpdeta2;
+        ddadeta[i][1] = state.curvppal[1] * (2.0 * g2 + state.curvppal[1] * q * h2) * dqdeta2;
         ddadeta[i][2] =
-            curvppal[0] * (xx1 * xx1 + yy1 * (g12 + curvppal[0] * p / 4.0 * h12)) * dpdeta2 +
-            curvppal[1] * (xx2 * xx2 + yy2 * (g22 + curvppal[1] * q / 4.0 * h22)) * dqdeta2;
+            state.curvppal[0] * (xx1 * xx1 + yy1 * (g12 + state.curvppal[0] * p / 4.0 * h12)) * dpdeta2 +
+            state.curvppal[1] * (xx2 * xx2 + yy2 * (g22 + state.curvppal[1] * q / 4.0 * h22)) * dqdeta2;
 
         pe[i] = bond_state.pe[i];
         dpedeta_all[i] =
@@ -482,10 +429,169 @@ InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
     return out;
 }
 
+template <typename EvaluateFn>
+NewtonInnerOutput solve_inner_newton_impl(const MatData& mat,
+                                          const Vec2& eta0,
+                                          const double crit,
+                                          const int max_iter,
+                                          EvaluateFn&& evaluate) {
+    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
+        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
+    }
+
+    NewtonInnerOutput out;
+    out.eta = eta0;
+    out.iterations = 0;
+    out.fail_mode = 0;
+
+    InnerPotentialOutput current = evaluate(out.eta);
+    double test = crit * (1.0 + std::abs(current.W));
+    double gnorm = norm(current.dWdeta);
+
+    if (gnorm <= test) {
+        out.W = current.W;
+        out.dWdeta = current.dWdeta;
+        out.ddWdeta = current.ddWdeta;
+        out.dW_dpe = current.dW_dpe;
+        return out;
+    }
+
+    while (gnorm > test && out.iterations < max_iter) {
+        ++out.iterations;
+        const double det = current.ddWdeta[0] * current.ddWdeta[1] -
+                           current.ddWdeta[2] * current.ddWdeta[2];
+
+        if (std::abs(det) < 1e-15) {
+            if (gnorm <= test * 10.0) {
+                break;
+            }
+            out.fail_mode = 1;
+            break;
+        }
+
+        Vec2 dx{
+            (current.dWdeta[1] * current.ddWdeta[2] -
+             current.dWdeta[0] * current.ddWdeta[1]) /
+                det,
+            (current.dWdeta[0] * current.ddWdeta[2] -
+             current.dWdeta[1] * current.ddWdeta[0]) /
+                det,
+        };
+
+        const double step_len = norm(dx);
+        if (step_len > 0.1 * mat.A0) {
+            dx = dx * (0.1 * mat.A0 / step_len);
+        }
+
+        out.eta = out.eta + dx;
+        if (norm(out.eta) > 0.5 * mat.A0) {
+            out.fail_mode = 2;
+            break;
+        }
+
+        current = evaluate(out.eta);
+        test = crit * (1.0 + std::abs(current.W));
+        gnorm = norm(current.dWdeta);
+    }
+
+    if (gnorm > test && out.fail_mode == 0) {
+        out.fail_mode = 3;
+    }
+
+    current = evaluate(out.eta);
+    out.W = current.W;
+    out.dWdeta = current.dWdeta;
+    out.ddWdeta = current.ddWdeta;
+    out.dW_dpe = current.dW_dpe;
+    return out;
+}
+
+}  // namespace
+
+BrennerOutput evaluate_brenner(const MatData& mat, const Vec6& pe) {
+    validate_brenner_material(mat);
+    for (int i = 0; i < 3; ++i) {
+        if (pe[i] <= 0.0) {
+            throw std::invalid_argument("Brenner bond lengths must be positive");
+        }
+    }
+
+    BrennerOutput out;
+    if (std::any_of(pe.begin(), pe.begin() + 3, [](double a) {
+            return a >= kBrennerCutoffRadius;
+        })) {
+        return out;
+    }
+
+    const Vec3 theta{pe[3], pe[4], pe[5]};
+    const auto ga = gang_bis(theta, mat);
+
+    for (int ibond = 0; ibond < 3; ++ibond) {
+        const int ip1 = kBondPermutations[ibond][0];
+        const int ip2 = kBondPermutations[ibond][1];
+        const double fang =
+            1.0 / std::sqrt(1.0 + ga[0][ip1] + ga[0][ip2]);
+        const Vec3 vr = vrep_bis(pe[ibond], mat);
+        const Vec3 va = vatt_bis(pe[ibond], mat);
+
+        out.W += vr[0] - fang * va[0];
+        out.dW[ibond] = vr[1] - fang * va[1];
+        out.dW[3 + ip1] += va[0] * std::pow(fang, 3.0) * ga[1][ip1] / 2.0;
+        out.dW[3 + ip2] += va[0] * std::pow(fang, 3.0) * ga[1][ip2] / 2.0;
+
+        out.ddW[ibond][ibond] = vr[2] - fang * va[2];
+        out.ddW[3 + ip1][3 + ip1] +=
+            ga[2][ip1] / 2.0 * va[0] * std::pow(fang, 3.0) -
+            0.75 * ga[1][ip1] * ga[1][ip1] * va[0] * std::pow(fang, 5.0);
+        out.ddW[3 + ip2][3 + ip2] +=
+            ga[2][ip2] / 2.0 * va[0] * std::pow(fang, 3.0) -
+            0.75 * ga[1][ip2] * ga[1][ip2] * va[0] * std::pow(fang, 5.0);
+        out.ddW[ibond][3 + ip1] = va[1] * std::pow(fang, 3.0) * ga[1][ip1] / 2.0;
+        out.ddW[ibond][3 + ip2] = va[1] * std::pow(fang, 3.0) * ga[1][ip2] / 2.0;
+        out.ddW[3 + ip1][3 + ip2] =
+            -0.75 * va[0] * std::pow(fang, 5.0) * ga[1][ip1] * ga[1][ip2];
+    }
+
+    for (int i = 0; i < 6; ++i) {
+        for (int j = i + 1; j < 6; ++j) {
+            if (out.ddW[i][j] == 0.0 && out.ddW[j][i] != 0.0) {
+                out.ddW[i][j] = out.ddW[j][i];
+            } else {
+                out.ddW[j][i] = out.ddW[i][j];
+            }
+        }
+    }
+
+    out.W /= mat.s0;
+    for (double& value : out.dW) {
+        value /= mat.s0;
+    }
+    for (auto& row : out.ddW) {
+        for (double& value : row) {
+            value /= mat.s0;
+        }
+    }
+    return out;
+}
+
+InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
+                                              const Vec2& curvppal,
+                                              const Mat22& vppal,
+                                              const MatData& mat,
+                                              const Vec2& eta) {
+    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
+        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
+    }
+    const ElementState prepared_state =
+        prepare_element_state(make_element_state_view(C_elem, curvppal, vppal), mat, eta);
+    return evaluate_inner_potential_from_prepared_state(prepared_state, mat);
+}
+
 InnerPotentialOutput evaluate_inner_potential(const ElementState& state,
                                               const MatData& mat,
                                               const Vec2& eta) {
-    return evaluate_inner_potential(state.C_elem, state.curvppal, state.vppal, mat, eta);
+    const ElementState prepared_state = ensure_prepared_element_state(state, mat, eta);
+    return evaluate_inner_potential_from_prepared_state(prepared_state, mat);
 }
 
 NewtonInnerOutput solve_inner_newton(const Voigt3& C_elem,
@@ -495,76 +601,12 @@ NewtonInnerOutput solve_inner_newton(const Voigt3& C_elem,
                                      const Vec2& eta0,
                                      const double crit,
                                      const int max_iter) {
-    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
-        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
-    }
-
-    NewtonInnerOutput out;
-    out.eta = eta0;
-    out.iterations = 0;
-    out.fail_mode = 0;
-
-    InnerPotentialOutput current =
-        evaluate_inner_potential(C_elem, curvppal, vppal, mat, out.eta);
-    double test = crit * (1.0 + std::abs(current.W));
-    double gnorm = norm(current.dWdeta);
-
-    if (gnorm <= test) {
-        out.W = current.W;
-        out.dWdeta = current.dWdeta;
-        out.ddWdeta = current.ddWdeta;
-        out.dW_dpe = current.dW_dpe;
-        return out;
-    }
-
-    while (gnorm > test && out.iterations < max_iter) {
-        ++out.iterations;
-        const double det = current.ddWdeta[0] * current.ddWdeta[1] -
-                           current.ddWdeta[2] * current.ddWdeta[2];
-
-        if (std::abs(det) < 1e-15) {
-            if (gnorm <= test * 10.0) {
-                break;
-            }
-            out.fail_mode = 1;
-            break;
-        }
-
-        Vec2 dx{
-            (current.dWdeta[1] * current.ddWdeta[2] -
-             current.dWdeta[0] * current.ddWdeta[1]) /
-                det,
-            (current.dWdeta[0] * current.ddWdeta[2] -
-             current.dWdeta[1] * current.ddWdeta[0]) /
-                det,
-        };
-
-        const double step_len = norm(dx);
-        if (step_len > 0.1 * mat.A0) {
-            dx = dx * (0.1 * mat.A0 / step_len);
-        }
-
-        out.eta = out.eta + dx;
-        if (norm(out.eta) > 0.5 * mat.A0) {
-            out.fail_mode = 2;
-            break;
-        }
-
-        current = evaluate_inner_potential(C_elem, curvppal, vppal, mat, out.eta);
-        test = crit * (1.0 + std::abs(current.W));
-        gnorm = norm(current.dWdeta);
-    }
-
-    if (gnorm > test && out.fail_mode == 0) {
-        out.fail_mode = 3;
-    }
-
-    current = evaluate_inner_potential(C_elem, curvppal, vppal, mat, out.eta);
-    out.W = current.W;
-    out.dWdeta = current.dWdeta;
-    out.ddWdeta = current.ddWdeta;
-    out.dW_dpe = current.dW_dpe;
-    return out;
+    return solve_inner_newton_impl(
+        mat,
+        eta0,
+        crit,
+        max_iter,
+        [&](const Vec2& eta) { return evaluate_inner_potential(C_elem, curvppal, vppal, mat, eta); });
 }
 
 NewtonInnerOutput solve_inner_newton(const ElementState& state,
@@ -572,75 +614,16 @@ NewtonInnerOutput solve_inner_newton(const ElementState& state,
                                      const Vec2& eta0,
                                      const double crit,
                                      const int max_iter) {
-    if (mat.nCode_Pot != 1 && mat.nCode_Pot != 2) {
-        throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported");
-    }
-
-    NewtonInnerOutput out;
-    out.eta = eta0;
-    out.iterations = 0;
-    out.fail_mode = 0;
-
-    InnerPotentialOutput current = evaluate_inner_potential(state, mat, out.eta);
-    double test = crit * (1.0 + std::abs(current.W));
-    double gnorm = norm(current.dWdeta);
-
-    if (gnorm <= test) {
-        out.W = current.W;
-        out.dWdeta = current.dWdeta;
-        out.ddWdeta = current.ddWdeta;
-        out.dW_dpe = current.dW_dpe;
-        return out;
-    }
-
-    while (gnorm > test && out.iterations < max_iter) {
-        ++out.iterations;
-        const double det = current.ddWdeta[0] * current.ddWdeta[1] -
-                           current.ddWdeta[2] * current.ddWdeta[2];
-
-        if (std::abs(det) < 1e-15) {
-            if (gnorm <= test * 10.0) {
-                break;
-            }
-            out.fail_mode = 1;
-            break;
-        }
-
-        Vec2 dx{
-            (current.dWdeta[1] * current.ddWdeta[2] -
-             current.dWdeta[0] * current.ddWdeta[1]) /
-                det,
-            (current.dWdeta[0] * current.ddWdeta[2] -
-             current.dWdeta[1] * current.ddWdeta[0]) /
-                det,
-        };
-
-        const double step_len = norm(dx);
-        if (step_len > 0.1 * mat.A0) {
-            dx = dx * (0.1 * mat.A0 / step_len);
-        }
-
-        out.eta = out.eta + dx;
-        if (norm(out.eta) > 0.5 * mat.A0) {
-            out.fail_mode = 2;
-            break;
-        }
-
-        current = evaluate_inner_potential(state, mat, out.eta);
-        test = crit * (1.0 + std::abs(current.W));
-        gnorm = norm(current.dWdeta);
-    }
-
-    if (gnorm > test && out.fail_mode == 0) {
-        out.fail_mode = 3;
-    }
-
-    current = evaluate_inner_potential(state, mat, out.eta);
-    out.W = current.W;
-    out.dWdeta = current.dWdeta;
-    out.ddWdeta = current.ddWdeta;
-    out.dW_dpe = current.dW_dpe;
-    return out;
+    ElementState prepared_state = state;
+    return solve_inner_newton_impl(
+        mat,
+        eta0,
+        crit,
+        max_iter,
+        [&](const Vec2& eta) {
+            prepared_state = ensure_prepared_element_state(prepared_state, mat, eta);
+            return evaluate_inner_potential_from_prepared_state(prepared_state, mat);
+        });
 }
 
 }  // namespace fce

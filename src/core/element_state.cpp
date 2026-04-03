@@ -58,18 +58,34 @@ ElementState compute_element_state(const NeighborCoords12& xneigh,
 PreparedBondState prepare_bond_state(const ElementState& state,
                                      const MatData& mat,
                                      const Vec2& eta) {
+    const ElementState prepared_state = prepare_element_state(state, mat, eta);
     PreparedBondState out;
-    out.Ei = compute_normalized_bonds(mat, eta, &out.A_norm);
-    out.bonds = compute_deformed_bonds(state.C_elem, state.curvppal, state.vppal, out.A_norm, out.Ei);
+    out.A_norm = prepared_state.prepared_bonds.A_norm;
+    out.Ei = prepared_state.prepared_bonds.Ei;
+    out.bonds = prepared_state.prepared_bonds.bonds;
     return out;
 }
 
 PreparedBondStateWithDerivatives prepare_bond_state_with_derivatives(const ElementState& state,
                                                                      const MatData& mat,
                                                                      const Vec2& eta) {
+    const ElementState prepared_state = prepare_element_state(state, mat, eta);
     PreparedBondStateWithDerivatives out;
-    out.Ei = compute_normalized_bonds(mat, eta, &out.A_norm);
-    out.bonds = compute_deformed_bonds_with_derivatives(
+    out.A_norm = prepared_state.prepared_bonds.A_norm;
+    out.Ei = prepared_state.prepared_bonds.Ei;
+    out.bonds = prepared_state.prepared_bonds.bonds_with_derivatives;
+    return out;
+}
+
+ElementState prepare_element_state(const ElementState& state,
+                                   const MatData& mat,
+                                   const Vec2& eta) {
+    ElementState out = state;
+    out.prepared_eta = eta;
+    out.prepared_material_A0 = mat.A0;
+    out.prepared_material_E = mat.E;
+    out.prepared_bonds.Ei = compute_normalized_bonds(mat, eta, &out.prepared_bonds.A_norm);
+    out.prepared_bonds.bonds_with_derivatives = compute_deformed_bonds_with_derivatives(
         state.C_elem,
         state.curvppal,
         state.vppal,
@@ -77,8 +93,10 @@ PreparedBondStateWithDerivatives prepare_bond_state_with_derivatives(const Eleme
         state.dcurvppaldk,
         state.dvppaldC,
         state.dvppaldk,
-        out.A_norm,
-        out.Ei);
+        out.prepared_bonds.A_norm,
+        out.prepared_bonds.Ei);
+    out.prepared_bonds.bonds.pe = out.prepared_bonds.bonds_with_derivatives.pe;
+    out.has_prepared_bond_state = true;
     return out;
 }
 
