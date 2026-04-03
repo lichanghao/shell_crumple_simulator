@@ -127,6 +127,45 @@ TEST(ElementState, RelaxedPipelineMatchesManualNewtonSolve) {
     EXPECT_EQ(actual.inner.fail_mode, expected.fail_mode);
 }
 
+TEST(ElementState, RelaxedPipelineReturnsConvergedPreparedBondStage) {
+    const auto xneigh = curved_patch();
+    const auto dn = curved_dn();
+    const auto ddn = curved_ddn();
+    const Mat22 f0{{Vec2{0.9, 0.1}, Vec2{-0.2, 1.1}}};
+    const Voigt3 reference_curvature{0.01, -0.02, 0.005};
+    const Vec2 eta0{0.003, -0.002};
+    const auto material = oracle_brenner_material();
+
+    const auto base_state = fce::compute_element_state(xneigh, dn, ddn, f0, reference_curvature);
+    const auto expected_inner = fce::solve_inner_newton(base_state, material, eta0, 1e-8, 100);
+    const auto expected_state = fce::prepare_element_state(base_state, material, expected_inner.eta);
+    const auto actual = fce::solve_inner_newton_for_element(
+        xneigh, dn, ddn, f0, reference_curvature, material, eta0, 1e-8, 100);
+
+    EXPECT_TRUE(actual.state.has_prepared_bond_state);
+    for (int i = 0; i < 2; ++i) {
+        EXPECT_NEAR(actual.state.prepared_eta[i], expected_inner.eta[i], tolerance(expected_inner.eta[i])) << i;
+    }
+    for (int ibond = 0; ibond < 3; ++ibond) {
+        EXPECT_NEAR(actual.state.prepared_bonds.A_norm[ibond],
+                    expected_state.prepared_bonds.A_norm[ibond],
+                    tolerance(expected_state.prepared_bonds.A_norm[ibond]))
+            << ibond;
+        for (int idim = 0; idim < 2; ++idim) {
+            EXPECT_NEAR(actual.state.prepared_bonds.Ei[ibond][idim],
+                        expected_state.prepared_bonds.Ei[ibond][idim],
+                        tolerance(expected_state.prepared_bonds.Ei[ibond][idim]))
+                << ibond << ", " << idim;
+        }
+    }
+    for (int i = 0; i < 6; ++i) {
+        EXPECT_NEAR(actual.state.prepared_bonds.bonds.pe[i],
+                    expected_state.prepared_bonds.bonds.pe[i],
+                    tolerance(expected_state.prepared_bonds.bonds.pe[i]))
+            << i;
+    }
+}
+
 TEST(ElementState, BondPreparationMatchesManualComposition) {
     const auto xneigh = curved_patch();
     const auto dn = curved_dn();

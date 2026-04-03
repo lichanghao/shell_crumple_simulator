@@ -112,6 +112,7 @@ RelaxedElementState solve_inner_newton_for_element(const NeighborCoords12& xneig
     RelaxedElementState out;
     out.state = compute_element_state(xneigh, dn, ddn, f0, reference_curvature);
     out.inner = solve_inner_newton(out.state, mat, eta0, crit, max_iter);
+    out.state = prepare_element_state(out.state, mat, out.inner.eta);
     return out;
 }
 
