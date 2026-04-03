@@ -1,4 +1,7 @@
 program dump_constitutive_oracle
+  ! This helper keeps the original synthetic Brenner/Newton corpus reproducible.
+  ! Archived simulator-derived constitutive fixtures are emitted by
+  ! test/cases/tools/dump_archived_constitutive_oracle.f90.
   use data_mat
   use data_vector2
   use data_vector3

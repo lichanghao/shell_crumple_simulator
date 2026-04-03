@@ -8,8 +8,9 @@
 
 ## Fixture Scope
 
-The committed files under `brenner/` and `newton_inner/` are fixed-output constitutive fixtures
-used by the C++ unit tests for the translated Brenner potential and inner Newton relaxation path.
+The committed files under `brenner/`, `newton_inner/`, and `archived_compression_np1/` are
+fixed-output constitutive fixtures used by the C++ unit tests for the translated Brenner potential,
+canonical prepared-bond path, and inner Newton relaxation path.
 
 - `brenner/case_01.dat` … `brenner/case_10.dat`
   - Inputs: six-component `pe = [a1, a2, a3, theta23, theta31, theta12]`
@@ -19,10 +20,16 @@ used by the C++ unit tests for the translated Brenner potential and inner Newton
   - Inputs: `C_elem`, `curvppal`, `vppal`, initial `eta`, `crit`, `maxn`
   - Outputs: Fortran `newton_inner` iteration count, fail mode, converged `eta`, final
     `Hyper_pot_inner` energy, gradient, curvature Hessian, and `dW/dpe`
+- `archived_compression_np1/case_01.dat` … `archived_compression_np1/case_10.dat`
+  - Inputs: archived `(element, gauss)` selectors from the frozen serial compression simulator
+    output under `test/cases/graphene_compression_simulator/np1/`
+  - Outputs: Fortran `metric`, `curv`, `principal`, archived prepared-bond scalars
+    (`A_norm`, `Ei`, `pe`), plus `newton_inner` and `Hyper_pot_inner` outputs evaluated on those
+    archived simulator states
 
 ## Reproduction Helper
 
-The fixtures are regenerated in this repository with:
+The synthetic Brenner and Newton fixtures are regenerated in this repository with:
 
 ```bash
 mkdir -p /tmp/constitutive_mods /tmp/constitutive_obj
@@ -45,18 +52,48 @@ gfortran -std=legacy -O0 -J /tmp/constitutive_mods \
 The helper's material constants and input states are intentionally committed in
 `test/cases/tools/dump_constitutive_oracle.f90` so the C++ fixtures stay reproducible and stable.
 
-## Archived-State Provenance Gap
+The archived compression fixtures are regenerated in this repository with:
 
-As of Round 15, the archived simulator artifacts committed under `test/cases/graphene_compression_simulator/`
-and `test/cases/graphene_cyclic_crumple/simulator_run/` do not contain the 10 intermediate per-load-step
-Newton states requested by the plan for AC-6. The available simulator-side state files are:
+```bash
+mkdir -p /tmp/archived_constitutive_mods /tmp/archived_constitutive_obj
+gfortran -std=legacy -O0 -J /tmp/archived_constitutive_mods -c \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/headers.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/Taylor.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/BSpline.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/gauss.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/geometry.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/principal.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/exponential.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/brenner.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/brenner2.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/morse.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/mm3.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/Hyper_pot_inner_alg.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/newton_inner.f90 \
+  test/cases/tools/dump_archived_constitutive_oracle.f90
+mv *.o /tmp/archived_constitutive_obj/
+gfortran -std=legacy -O0 -J /tmp/archived_constitutive_mods \
+  -o /tmp/dump_archived_constitutive_oracle /tmp/archived_constitutive_obj/*.o
+/tmp/dump_archived_constitutive_oracle \
+  test/cases/graphene_compression_simulator/np1 \
+  test/cases/constitutive_oracle/archived_compression_np1
+```
 
-- final-state `nano_config.dat` outputs written by `write_config(...)`
-- cycle-end `nano_checkpoint.dat` outputs written by `write_checkpoint(...)`
+## Archived Compression Fixture Provenance
 
-The frozen Fortran sources confirm that `write_checkpoint(...)` runs only at the end of each complete
-compression-release cycle, and `write_config(...)` writes only the final state. That means the current
-committed oracle repository exposes final or cycle-end `eta` fields, but not a sequence of 10 archived
-load-step extracts suitable for direct `newton_inner` fixture generation. Until those intermediate states
-are captured from the frozen simulator, the committed `newton_inner/case_01.dat` … `case_10.dat` corpus
-remains helper-generated rather than archived-state derived.
+`test/cases/tools/dump_archived_constitutive_oracle.f90` reads the committed serial compression oracle under
+`test/cases/graphene_compression_simulator/np1/` and emits ten archived constitutive cases from the frozen
+final-state simulator outputs.
+
+- Geometry and reference state come directly from `nano_config.dat`, `nano_Mesh.dat`, and `nano_zero.dat`
+- The helper selects the first five elements whose 12-node `neigh_vert` patch stays entirely within the
+  real-node range, then emits both Gauss points for each selected element
+- The committed selectors are element IDs `83` through `87` with Gauss points `1` and `2`
+- For each case the helper evaluates frozen Fortran `metric`, `curv`, `principal`, and `def_bonds_`
+  on the archived simulator coordinates and archived `eta`
+- The same helper then runs frozen `newton_inner` and `Hyper_pot_inner` on that archived geometric state
+  with `crit=1e-8` and `max_iter=100`, using the archived `eta` from `nano_config.dat` as the initial state
+
+This replaces the previous provenance-gap note for the geometry/bond slice with direct archived evidence:
+the C++ regression now rebuilds the same archived element-Gauss patches from the committed simulator files
+and compares them against Fortran-emitted constitutive fixtures under `archived_compression_np1/`.
