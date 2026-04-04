@@ -654,3 +654,63 @@ TEST(ElementEnergy, FlagNumDiffStressesMatchFortranOracle) {
         }
     }
 }
+
+// ─── Test: Brenner material element energy matches Fortran oracle ─────────────────────────────
+
+TEST(ElementEnergy, BrennerMaterialMatchesFortranOracle) {
+    // Uses element 83's geometry from the archived compression state but with the Brenner REBO
+    // material (nCode_Pot=2). Compares W_elem and f_elem(12,3) against the Fortran oracle
+    // dump_element_energy_brenner_oracle.f90 which uses the same geometry and Brenner parameters.
+    // This validates the production compute_element_energy path for nCode_Pot=2.
+    const fs::path fixture_path =
+        fs::path(ORACLE_DIR) / "element_energy_oracle" / "brenner_geom_np1" / "case_01.dat";
+    const auto rows = read_rows(fixture_path);
+    ASSERT_EQ(rows.size(), 14U) << "fixture must have 14 rows (header + W_elem + 12 nodes)";
+
+    const int fixture_elem   = static_cast<int>(rows[0].at(0));  // 1-based
+    const int fixture_ngauss = static_cast<int>(rows[0].at(1));
+    const double fixture_W_elem = rows[1].at(0);
+
+    // Brenner material: same parameters as dump_constitutive_oracle.f90 / dump_element_energy_brenner_oracle.f90
+    fce::MatData mat;
+    mat.nCode_Pot = 2;
+    mat.A0 = 0.142;
+    mat.A1 = 0.142;
+    mat.s0 = 3.0 * std::sqrt(3.0) * mat.A0 * mat.A0 / 2.0;
+    mat.E[0] = {std::sqrt(3.0) / 2.0, 0.5};
+    mat.E[1] = {-std::sqrt(3.0) / 2.0, 0.5};
+    mat.E[2] = {0.0, -1.0};
+    mat.Vs = {0.60310500860214233, 26.25, 0.9};
+    mat.Va = {0.75400000810623169, 0.149, 0.25};
+
+    const auto& archive = archived_compression_state();
+    const int ngauss = archive.dims.ngauss;
+    const Voigt3 reference_curvature{0.0, 0.0, 0.0};
+
+    ASSERT_EQ(fixture_elem - 1, 82) << "oracle must be for element 83 (0-based: 82)";
+    ASSERT_EQ(fixture_ngauss, ngauss);
+
+    const int element_index = fixture_elem - 1;  // 0-based
+    const auto xneigh = neighbor_patch_from_archive(archive, element_index);
+    const auto& f0 = archive.ref_config.at(static_cast<std::size_t>(element_index)).F0;
+    const std::vector<Vec2> eta0(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0});
+
+    const auto result = fce::compute_element_energy(
+        xneigh, f0, reference_curvature, archive.gauss,
+        mat, /*nW_hat=*/true, 1e-8, 100, eta0);
+
+    ASSERT_EQ(result.inner_fail, 0) << "Brenner inner Newton must converge for element 83";
+
+    // Tolerance: 1e-6 absolute (Brenner values are O(100), inner FD with h=1e-8 gives ~1e-6 differences)
+    constexpr double tol = 1e-6;
+    EXPECT_NEAR(result.W_elem, fixture_W_elem, tol) << "W_elem mismatch vs Fortran Brenner oracle";
+
+    for (int inode = 0; inode < 12; ++inode) {
+        const auto& row = rows.at(static_cast<std::size_t>(2 + inode));
+        for (int k = 0; k < 3; ++k) {
+            const double expected = row.at(static_cast<std::size_t>(k));
+            EXPECT_NEAR(result.f_elem[inode][k], expected, std::max(tol, std::abs(expected) * 1e-6))
+                << "f_elem[" << inode << "][" << k << "] vs Fortran Brenner oracle";
+        }
+    }
+}

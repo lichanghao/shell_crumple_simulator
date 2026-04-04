@@ -1,10 +1,21 @@
 #include "fce/exponential.hpp"
+#include "fce/io.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+#ifndef ORACLE_DIR
+#define ORACLE_DIR "test/cases"
+#endif
 
 namespace {
 
@@ -38,6 +49,85 @@ double fourth_order_central_difference(double minus2, double minus1, double plus
 
 fce::PrincipalResult reference_principal_state() {
     return fce::compute_principal_curvature(Voigt3{1.1, 0.9, 0.1}, Voigt3{0.23, 0.11, 0.04});
+}
+
+namespace fs = std::filesystem;
+
+// ── Minimal fixture reader (mirrors the format in dump_principal_exponential_oracle.f90) ──
+
+struct PExpFixture {
+    fce::Voigt3 C_elem{};
+    fce::Voigt3 curv0_elem{};
+    bool flag_num_diff{false};
+    fce::Vec2 curvppal{};
+    fce::Mat22 vppal{};
+    fce::PrincipalDerivativeVector dcurvppaldC{};
+    fce::PrincipalDerivativeVector dcurvppaldk{};
+    fce::PrincipalDerivativeMatrix dvppaldC{};
+    fce::PrincipalDerivativeMatrix dvppaldk{};
+    std::array<double, 3> A_norm{};
+    std::array<fce::Vec2, 3> Ei{};
+    fce::Vec6 pe{};
+    std::array<fce::Voigt3, 6> dpedC{};
+    std::array<fce::Voigt3, 6> dpedk{};
+};
+
+static std::vector<std::vector<double>> exp_read_rows(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) throw std::runtime_error("cannot open: " + path.string());
+    std::vector<std::vector<double>> rows;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        std::istringstream iss(line);
+        std::vector<double> row;
+        std::string token;
+        while (iss >> token) row.push_back(fce::io::parse_fortran_double(token));
+        if (!row.empty()) rows.push_back(row);
+    }
+    return rows;
+}
+
+static std::vector<fs::path> exp_sorted_paths(const fs::path& dir) {
+    std::vector<fs::path> result;
+    for (const auto& e : fs::directory_iterator(dir)) {
+        if (e.is_regular_file() && e.path().extension() == ".dat") result.push_back(e.path());
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+static PExpFixture read_pexp_fixture_exp(const fs::path& path) {
+    const auto rows = exp_read_rows(path);
+    if (rows.size() != 36U) {
+        throw std::runtime_error("unexpected row count " + std::to_string(rows.size()) + " in " + path.string());
+    }
+    PExpFixture f;
+    f.C_elem        = fce::Voigt3{rows[1][0], rows[1][1], rows[1][2]};
+    f.curv0_elem    = fce::Voigt3{rows[2][0], rows[2][1], rows[2][2]};
+    f.flag_num_diff = (static_cast<int>(rows[3][0]) != 0);
+    f.curvppal      = fce::Vec2{rows[4][0], rows[4][1]};
+    f.vppal         = fce::Mat22{{fce::Vec2{rows[5][0], rows[5][1]}, fce::Vec2{rows[6][0], rows[6][1]}}};
+    f.dcurvppaldC[0] = fce::Voigt3{rows[7][0], rows[7][1], rows[7][2]};
+    f.dcurvppaldC[1] = fce::Voigt3{rows[8][0], rows[8][1], rows[8][2]};
+    f.dcurvppaldk[0] = fce::Voigt3{rows[9][0], rows[9][1], rows[9][2]};
+    f.dcurvppaldk[1] = fce::Voigt3{rows[10][0], rows[10][1], rows[10][2]};
+    f.dvppaldC[0][0] = fce::Voigt3{rows[11][0], rows[11][1], rows[11][2]};
+    f.dvppaldC[0][1] = fce::Voigt3{rows[12][0], rows[12][1], rows[12][2]};
+    f.dvppaldC[1][0] = fce::Voigt3{rows[13][0], rows[13][1], rows[13][2]};
+    f.dvppaldC[1][1] = fce::Voigt3{rows[14][0], rows[14][1], rows[14][2]};
+    f.dvppaldk[0][0] = fce::Voigt3{rows[15][0], rows[15][1], rows[15][2]};
+    f.dvppaldk[0][1] = fce::Voigt3{rows[16][0], rows[16][1], rows[16][2]};
+    f.dvppaldk[1][0] = fce::Voigt3{rows[17][0], rows[17][1], rows[17][2]};
+    f.dvppaldk[1][1] = fce::Voigt3{rows[18][0], rows[18][1], rows[18][2]};
+    f.A_norm = {rows[19][0], rows[19][1], rows[19][2]};
+    f.Ei[0] = fce::Vec2{rows[20][0], rows[20][1]};
+    f.Ei[1] = fce::Vec2{rows[21][0], rows[21][1]};
+    f.Ei[2] = fce::Vec2{rows[22][0], rows[22][1]};
+    for (int i = 0; i < 6; ++i) f.pe[i] = rows[23][static_cast<std::size_t>(i)];
+    for (int i = 0; i < 6; ++i) f.dpedC[i] = fce::Voigt3{rows[24 + i][0], rows[24 + i][1], rows[24 + i][2]};
+    for (int i = 0; i < 6; ++i) f.dpedk[i] = fce::Voigt3{rows[30 + i][0], rows[30 + i][1], rows[30 + i][2]};
+    return f;
 }
 
 }  // namespace
@@ -179,6 +269,45 @@ TEST(Exponential, CoupledMetricAndCurvatureDerivativesMatchFiniteDifference) {
                 fourth_order_central_difference(minus2_result.pe[i], minus_result.pe[i], plus_result.pe[i], plus2_result.pe[i], h);
             EXPECT_NEAR(base.dpedk[i][j], fd, coupled_derivative_tolerance(fd))
                 << "coupled curvature derivative bond_component=" << i << " curvature_component=" << j;
+        }
+    }
+}
+
+TEST(Exponential, MatchesArchivedCompressionFortranOracle) {
+    // Compares compute_deformed_bonds_with_derivatives against Fortran-derived fixtures for
+    // elements 83-87 of the archived compression simulator state (10 cases).
+    // Bond geometry uses eta=0 (inner displacement zero) — see oracle driver comments.
+    // Tolerance 1e-12: analytical formula, identical floating-point operations.
+    const fs::path fixture_dir =
+        fs::path(ORACLE_DIR) / "principal_exponential_oracle";
+    const auto fixture_paths = exp_sorted_paths(fixture_dir);
+    ASSERT_GE(fixture_paths.size(), 10U);
+
+    constexpr double tol = 1e-12;
+
+    for (const auto& path : fixture_paths) {
+        const auto f = read_pexp_fixture_exp(path);
+
+        const auto result = fce::compute_deformed_bonds_with_derivatives(
+            f.C_elem,
+            f.curvppal,
+            f.vppal,
+            f.dcurvppaldC,
+            f.dcurvppaldk,
+            f.dvppaldC,
+            f.dvppaldk,
+            f.A_norm,
+            f.Ei);
+
+        for (int i = 0; i < 6; ++i) {
+            EXPECT_NEAR(result.pe[i], f.pe[i], tol)
+                << path.string() << " pe[" << i << "]";
+            for (int j = 0; j < 3; ++j) {
+                EXPECT_NEAR(result.dpedC[i][j], f.dpedC[i][j], tol)
+                    << path.string() << " dpedC[" << i << "][" << j << "]";
+                EXPECT_NEAR(result.dpedk[i][j], f.dpedk[i][j], tol)
+                    << path.string() << " dpedk[" << i << "][" << j << "]";
+            }
         }
     }
 }

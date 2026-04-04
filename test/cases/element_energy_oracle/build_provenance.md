@@ -97,3 +97,44 @@ Note: `energy.f90` (which contains `Hyper_Pot` and `Stresses` but also an MPI in
 intentionally excluded. The oracle implements `My_Hyper_Pot` (Morse wrapper) and
 `My_Stresses` as contained subroutines, matching the canonical `Hyper_Pot` and `Stresses`
 semantics exactly.
+
+### `brenner_geom_np1/case_01.dat`
+
+Canonical Fortran reference for `ElementEnergy.BrennerMaterialMatchesFortranOracle` (task3c).
+Validates the production `compute_element_energy` path for Brenner REBO (`nCode_Pot=2`).
+
+- **Element**: 83 (1-based), same connectivity as archived cases
+- **ngauss**: 2
+- **Geometry**: element 83 x,y,z from `nano_final_config.dat` (same as archived_compression_np1)
+- **Material**: Brenner REBO — same parameters as `dump_constitutive_oracle.f90`
+  (`A0=0.142`, `A1=0.142`, `Vs=[0.603105, 26.25, 0.9]`, `Va=[0.754000, 0.149, 0.25]`)
+- **Path**: analytical (`flag_num_diff=false` for element 83 deformed geometry)
+- **Format**: same as archived_compression_np1/case_01.dat (14 rows: header + W_elem + 12 f_elem)
+- **Tolerance**: 1e-6 absolute (Brenner values O(100); gfortran/g++ rounding ~1e-6)
+
+**Reproduction**:
+
+```bash
+mkdir -p /tmp/brenner_ee_mods /tmp/brenner_ee_obj
+cd /path/to/parent && gfortran -std=legacy -O0 -J /tmp/brenner_ee_mods -c \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/headers.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/Taylor.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/BSpline.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/gauss.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/geometry.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/principal.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/exponential.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/brenner.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/brenner2.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/morse.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/mm3.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/Hyper_pot_inner_alg.f90 \
+  finite_crystal_elasticity/grapheneCompressionOriginVersion/newton_inner.f90 \
+  finite_crystal_elasticity_Cpp/test/cases/tools/dump_element_energy_brenner_oracle.f90
+mv *.o /tmp/brenner_ee_obj/
+gfortran -std=legacy -O0 -J /tmp/brenner_ee_mods \
+  -o /tmp/dump_element_energy_brenner_oracle /tmp/brenner_ee_obj/*.o
+/tmp/dump_element_energy_brenner_oracle \
+  finite_crystal_elasticity_Cpp/test/cases/graphene_compression_simulator/np1 \
+  finite_crystal_elasticity_Cpp/test/cases/element_energy_oracle
+```
