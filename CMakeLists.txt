@@ -52,6 +52,7 @@ add_library(fce_core
   src/core/preprocessor.cpp
   src/core/quadrature.cpp
   src/core/reference_config.cpp
+  src/core/simulator.cpp
   src/core/taylor.cpp
   src/core/vdw_preprocessor.cpp
 )
@@ -96,6 +97,7 @@ add_executable(unit_tests
   test/unit/test_mpi_env.cpp
   test/unit/test_principal.cpp
   test/unit/test_reference_config.cpp
+  test/unit/test_simulator.cpp
 )
 target_link_libraries(unit_tests PRIVATE
   fce_core
