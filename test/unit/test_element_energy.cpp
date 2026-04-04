@@ -453,3 +453,53 @@ TEST(ElementEnergy, FlagNumDiffPathProducesFiniteEnergyAndForces) {
         }
     }
 }
+
+// ─── Test: f_elem matches Fortran oracle for element 83 (analytical path) ────────────────────
+
+TEST(ElementEnergy, FElemMatchesFortranOracle) {
+    // Canonical Fortran reference: dump_element_energy_oracle.f90 calls ener_elem.f90's
+    // analytical path (flag_num_diff=false) for element 83 from the deformed compression
+    // state and dumps W_elem and f_elem(12,3).  Both must match within 1e-8 absolute.
+    const fs::path fixture_path =
+        fs::path(ORACLE_DIR) / "element_energy_oracle" / "archived_compression_np1" / "case_01.dat";
+    const auto rows = read_rows(fixture_path);
+    ASSERT_EQ(rows.size(), 14U) << "fixture must have 14 rows (header + W_elem + 12 nodes)";
+
+    const int fixture_elem  = static_cast<int>(rows[0].at(0));  // 1-based
+    const int fixture_ngauss = static_cast<int>(rows[0].at(1));
+    const double fixture_W_elem = rows[1].at(0);
+
+    const auto& archive = archived_compression_state();
+    const auto& mat = archive.general.mat;
+    const int ngauss = archive.dims.ngauss;
+    const Voigt3 reference_curvature{0.0, 0.0, 0.0};
+
+    ASSERT_EQ(fixture_elem - 1, 82) << "oracle must be for element 83 (0-based: 82)";
+    ASSERT_EQ(fixture_ngauss, ngauss);
+
+    const int element_index = fixture_elem - 1;  // 0-based
+    const auto xneigh = neighbor_patch_from_archive(archive, element_index);
+    const auto& f0 = archive.ref_config.at(static_cast<std::size_t>(element_index)).F0;
+    const std::vector<Vec2> eta0(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0});
+
+    const auto result = fce::compute_element_energy(
+        xneigh, f0, reference_curvature, archive.gauss,
+        mat, /*nW_hat=*/true, 1e-8, 100, eta0);
+
+    ASSERT_EQ(result.inner_fail, 0) << "inner Newton must converge for element 83";
+
+    // Check W_elem
+    constexpr double tol = 1e-8;
+    EXPECT_NEAR(result.W_elem, fixture_W_elem, tol)
+        << "W_elem mismatch vs Fortran oracle";
+
+    // Check f_elem(12 nodes × 3 components) — rows 2..13 of fixture
+    for (int inode = 0; inode < 12; ++inode) {
+        const auto& row = rows.at(static_cast<std::size_t>(2 + inode));
+        for (int k = 0; k < 3; ++k) {
+            const double expected = row.at(static_cast<std::size_t>(k));
+            EXPECT_NEAR(result.f_elem[inode][k], expected, tol)
+                << "f_elem[" << inode << "][" << k << "] mismatch vs Fortran oracle";
+        }
+    }
+}
