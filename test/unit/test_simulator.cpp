@@ -6,8 +6,11 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #ifndef ORACLE_DIR
 #define ORACLE_DIR "test/cases"
@@ -21,32 +24,93 @@ double relative_tolerance(double expected) {
     return std::max(1e-12, std::abs(expected) * 1e-4);
 }
 
+fs::path archived_case_dir() {
+    return fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+}
+
+std::vector<double> read_archived_step_energies(const fs::path& energy_path) {
+    std::ifstream in(energy_path);
+    if (!in) {
+        throw std::runtime_error("cannot open energy oracle: " + energy_path.string());
+    }
+
+    std::vector<double> energies;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        std::vector<std::string> tokens;
+        std::string token;
+        while (row >> token) {
+            tokens.push_back(token);
+        }
+        if (tokens.size() < 2) {
+            continue;
+        }
+
+        double load_step = 0.0;
+        try {
+            load_step = fce::io::parse_fortran_double(tokens[0]);
+        } catch (const std::exception&) {
+            continue;
+        }
+        if (load_step <= 0.0) {
+            continue;
+        }
+        energies.push_back(fce::io::parse_fortran_double(tokens[1]));
+    }
+
+    return energies;
+}
+
+fs::path step_vtu_path(const fs::path& case_dir, const int step) {
+    std::ostringstream name;
+    name << "mesh_config_" << std::setw(4) << std::setfill('0') << step << ".vtu";
+    return case_dir / name.str();
+}
+
 }  // namespace
 
 TEST(SimulatorAssembly, LoadStepOneEnergyMatchesArchivedCompressionOracle) {
-    const fs::path case_dir =
-        fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+    const fs::path case_dir = archived_case_dir();
 
     const auto input = fce::load_simulator_input(case_dir.string());
     const auto coords = fce::read_vtu_points(
-        (case_dir / "mesh_config_0001.vtu").string(),
+        step_vtu_path(case_dir, 1).string(),
         input.mesh.numnods);
     const auto result = fce::assemble_energy_forces(input, coords, 0, input.mesh.numele);
+    const auto energies = read_archived_step_energies(case_dir / "energy.dat");
 
-    constexpr double expected_energy = 5.7210528e-05;
+    ASSERT_GE(energies.size(), 1U);
+    const double expected_energy = energies[0];
     EXPECT_NEAR(result.total_energy, expected_energy, relative_tolerance(expected_energy));
     EXPECT_EQ(result.inner_fail, 0);
     EXPECT_EQ(result.force.size(),
               static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)));
 }
 
+TEST(SimulatorAssembly, ArchivedEnergyTrajectoryMatchesOracleFile) {
+    const fs::path case_dir = archived_case_dir();
+    const auto input = fce::load_simulator_input(case_dir.string());
+    const auto energies = read_archived_step_energies(case_dir / "energy.dat");
+
+    ASSERT_EQ(energies.size(), 50U);
+    for (int step = 1; step <= 50; ++step) {
+        const auto coords = fce::read_vtu_points(
+            step_vtu_path(case_dir, step).string(),
+            input.mesh.numnods);
+        const auto result = fce::assemble_energy_forces(input, coords, 0, input.mesh.numele);
+        const double expected_energy = energies[static_cast<std::size_t>(step - 1)];
+        EXPECT_NEAR(result.total_energy, expected_energy, relative_tolerance(expected_energy))
+            << "step=" << step;
+    }
+}
+
 TEST(SimulatorAssembly, SplitRangesSumToFullAssembly) {
-    const fs::path case_dir =
-        fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+    const fs::path case_dir = archived_case_dir();
 
     const auto input = fce::load_simulator_input(case_dir.string());
     const auto coords = fce::read_vtu_points(
-        (case_dir / "mesh_config_0001.vtu").string(),
+        step_vtu_path(case_dir, 1).string(),
         input.mesh.numnods);
 
     const auto full = fce::assemble_energy_forces(input, coords, 0, input.mesh.numele);
@@ -62,31 +126,50 @@ TEST(SimulatorAssembly, SplitRangesSumToFullAssembly) {
     }
 }
 
-TEST(SimulatorAssembly, CorruptedVtuPointCountIsRejected) {
+TEST(SimulatorAssembly, CorruptedMeshInputIsRejected) {
+    const fs::path case_dir = archived_case_dir();
     const fs::path temp_dir =
-        fs::temp_directory_path() / "fce_simulator_corrupted_vtu";
+        fs::temp_directory_path() / "fce_simulator_corrupted_mesh";
     fs::create_directories(temp_dir);
-    const fs::path vtu_path = temp_dir / "broken.vtu";
 
-    std::ofstream out(vtu_path);
-    ASSERT_TRUE(out.is_open());
-    out << "<?xml version=\"1.0\"?>\n";
-    out << "<VTKFile type=\"UnstructuredGrid\" version=\"0.1\" byte_order=\"LittleEndian\">\n";
-    out << "  <UnstructuredGrid>\n";
-    out << "    <Piece NumberOfPoints=\"3\" NumberOfCells=\"1\">\n";
-    out << "      <Points>\n";
-    out << "        <DataArray type=\"Float64\" NumberOfComponents=\"3\" format=\"ascii\">\n";
-    out << "          0 0 0\n";
-    out << "          1 0 0\n";
-    out << "        </DataArray>\n";
-    out << "      </Points>\n";
-    out << "    </Piece>\n";
-    out << "  </UnstructuredGrid>\n";
-    out << "</VTKFile>\n";
-    out.close();
+    for (const auto* file : {
+             "nano_dims.dat",
+             "nano_general.dat",
+             "nano_zero.dat",
+             "nano_config.dat",
+             "nano_BCs.dat",
+         }) {
+        fs::copy_file(case_dir / file,
+                      temp_dir / file,
+                      fs::copy_options::overwrite_existing);
+    }
+
+    {
+        std::ifstream in(case_dir / "nano_Mesh.dat");
+        ASSERT_TRUE(in.is_open());
+        std::ofstream out(temp_dir / "nano_Mesh.dat");
+        ASSERT_TRUE(out.is_open());
+
+        std::string line;
+        bool corrupted = false;
+        while (std::getline(in, line)) {
+            if (!corrupted && line.find("        0        1") != std::string::npos) {
+                out << "        0   999999\n";
+                corrupted = true;
+            } else {
+                out << line << "\n";
+            }
+        }
+        ASSERT_TRUE(corrupted);
+    }
+
+    const auto input = fce::load_simulator_input(temp_dir.string());
+    const auto coords = fce::read_vtu_points(
+        step_vtu_path(case_dir, 1).string(),
+        input.mesh.numnods);
 
     EXPECT_THROW(
-        (void)fce::read_vtu_points(vtu_path.string(), 3),
+        (void)fce::assemble_energy_forces(input, coords, 0, input.mesh.numele),
         std::runtime_error);
 
     fs::remove_all(temp_dir);
