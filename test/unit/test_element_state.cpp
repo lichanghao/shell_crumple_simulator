@@ -233,7 +233,7 @@ const ArchivedCompressionState& archived_compression_state() {
         out.general = fce::io::read_general((case_dir / "nano_general.dat").string());
         out.mesh = fce::io::read_mesh((case_dir / "nano_Mesh.dat").string(), out.dims.ngauss);
         out.ref_config = fce::io::read_zero((case_dir / "nano_zero.dat").string(), out.dims.numele);
-        out.config = fce::io::read_config((case_dir / "nano_config.dat").string(),
+        out.config = fce::io::read_config((case_dir / "nano_final_config.dat").string(),
                                           out.dims.numnods,
                                           out.dims.numele,
                                           out.dims.ngauss);
@@ -508,6 +508,11 @@ TEST(ElementState, MatchesArchivedCompressionSimulatorOracleFixtures) {
 
     for (const auto& path : fixtures) {
         const auto fixture = read_archived_fixture(path);
+        // Non-triviality guard: archived geometry must be genuinely deformed, not the flat
+        // undeformed initial state (curv0_elem must be non-zero for real bending).
+        ASSERT_GT(std::abs(fixture.curv0_elem[0]), 1e-4)
+            << path.string() << ": fixture curv0_elem[0] is near zero — fixture may be undeformed";
+
         const auto xneigh = neighbor_patch_from_archive(archive, fixture.element_index);
         const auto dn = shape_gradient_from_archive(archive, fixture.gauss_index);
         const auto ddn = shape_curvature_from_archive(archive, fixture.gauss_index);
@@ -527,6 +532,12 @@ TEST(ElementState, MatchesArchivedCompressionSimulatorOracleFixtures) {
                 << path.string() << " A_norm[" << i << "]";
             EXPECT_NEAR(inner.ddWdeta[i], fixture.ddWdeta[i], tolerance(fixture.ddWdeta[i]))
                 << path.string() << " ddWdeta[" << i << "]";
+            for (int j = 0; j < 2; ++j) {
+                EXPECT_NEAR(prepared_state.prepared_bonds.Ei[i][j],
+                            fixture.Ei[i][j],
+                            tolerance(fixture.Ei[i][j]))
+                    << path.string() << " Ei[" << i << "][" << j << "]";
+            }
         }
         for (int i = 0; i < 2; ++i) {
             EXPECT_NEAR(state.curvppal[i], fixture.curvppal[i], tolerance(fixture.curvppal[i]))
@@ -540,17 +551,15 @@ TEST(ElementState, MatchesArchivedCompressionSimulatorOracleFixtures) {
             for (int j = 0; j < 2; ++j) {
                 EXPECT_NEAR(state.vppal[i][j], fixture.vppal[i][j], tolerance(fixture.vppal[i][j]))
                     << path.string() << " vppal[" << i << "][" << j << "]";
-                EXPECT_NEAR(prepared_state.prepared_bonds.Ei[i][j],
-                            fixture.Ei[i][j],
-                            tolerance(fixture.Ei[i][j]))
-                    << path.string() << " Ei[" << i << "][" << j << "]";
             }
         }
         for (int i = 0; i < 6; ++i) {
             EXPECT_NEAR(prepared_state.prepared_bonds.bonds.pe[i], fixture.pe[i], tolerance(fixture.pe[i]))
                 << path.string() << " pe[" << i << "]";
-            EXPECT_NEAR(inner.dW_dpe[i], fixture.dW_dpe[i], tolerance(fixture.dW_dpe[i]))
-                << path.string() << " dW_dpe[" << i << "]";
+            // dW_dpe is intentionally NOT checked here: the archived simulator uses nCode_Pot=1 (Morse),
+            // and the Fortran Inner_Morse subroutine never writes dW/dpe — the fixture stores the
+            // zero-initialized gfortran default, not a meaningful oracle value. dW_dpe correctness
+            // is covered by the synthetic Brenner oracle in test_constitutive.cpp.
         }
         EXPECT_NEAR(inner.W, fixture.W, tolerance(fixture.W)) << path.string() << " W";
         EXPECT_EQ(inner.iterations, fixture.iterations) << path.string();

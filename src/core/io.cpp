@@ -507,13 +507,13 @@ Mesh read_mesh(const std::string& path, int ngauss) {
         std::getline(f, line); el.num_neigh_elem = std::stoi(line);
         // num_neigh_vert
         std::getline(f, line); el.num_neigh_vert = std::stoi(line);
-        // 12 pairs neigh_elem, neigh_vert (ghost_flag and node index, 1-based → 0-based)
+        // 12 pairs: col0 = neighboring element index (1-based, 0 if none), col1 = node index (1-based, 0 if absent)
         for (int j = 0; j < 12; ++j) {
             std::getline(f, line);
             auto toks = tokenize(line);
-            el.neigh_elem[j] = std::stoi(toks[0]);            // ghost flag (0=real)
+            el.neigh_elem[j] = std::stoi(toks[0]);
             int ni = std::stoi(toks[1]);
-            el.neigh_vert[j] = (el.neigh_elem[j] == 0 && ni > 0) ? (ni - 1) : ni; // real node: 1→0; ghost: keep raw
+            el.neigh_vert[j] = (ni > 0) ? (ni - 1) : -1; // convert 1-based → 0-based (real and ghost alike)
         }
         // code_bc(1:3)
         std::getline(f, line);

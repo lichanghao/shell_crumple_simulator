@@ -139,7 +139,7 @@ program dump_archived_constitutive_oracle
   dims_path = trim(case_dir) // "/nano_dims.dat"
   general_path = trim(case_dir) // "/nano_general.dat"
   zero_path = trim(case_dir) // "/nano_zero.dat"
-  config_path = trim(case_dir) // "/nano_config.dat"
+  config_path = trim(case_dir) // "/nano_final_config.dat"
   mesh_path = trim(case_dir) // "/nano_Mesh.dat"
 
   call execute_command_line("mkdir -p " // trim(out_dir))

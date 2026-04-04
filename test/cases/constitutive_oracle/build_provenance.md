@@ -56,6 +56,7 @@ The archived compression fixtures are regenerated in this repository with:
 
 ```bash
 mkdir -p /tmp/archived_constitutive_mods /tmp/archived_constitutive_obj
+rm -f /tmp/archived_constitutive_obj/*.o
 gfortran -std=legacy -O0 -J /tmp/archived_constitutive_mods -c \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/headers.f90 \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/Taylor.f90 \
@@ -85,15 +86,21 @@ gfortran -std=legacy -O0 -J /tmp/archived_constitutive_mods \
 `test/cases/graphene_compression_simulator/np1/` and emits ten archived constitutive cases from the frozen
 final-state simulator outputs.
 
-- Geometry and reference state come directly from `nano_config.dat`, `nano_Mesh.dat`, and `nano_zero.dat`
+- **Node positions** come from `nano_final_config.dat` — the fully deformed state after 50 load steps.
+  This produces non-trivial `C_elem` and non-zero `curv0_elem` (bending curvature), unlike the flat initial
+  state in `nano_config.dat` which yields identity metrics and zero curvatures.
+- **Inner displacements** (`eta`): `nano_final_config.dat` stores zero eta (the Fortran simulator resets eta
+  after each accepted Newton step and does not write the per-Gauss-point converged eta back to the final
+  config file). The helper therefore starts Newton from `eta=0` on the deformed geometry, which is the
+  same initial condition used inside the frozen simulator's element loop.
+- **Mesh connectivity** comes from `nano_Mesh.dat`; **reference deformation gradients** from `nano_zero.dat`.
 - The helper selects the first five elements whose 12-node `neigh_vert` patch stays entirely within the
-  real-node range, then emits both Gauss points for each selected element
-- The committed selectors are element IDs `83` through `87` with Gauss points `1` and `2`
+  real-node range, then emits both Gauss points for each selected element.
+- The committed selectors are element IDs `83` through `87` with Gauss points `1` and `2`.
 - For each case the helper evaluates frozen Fortran `metric`, `curv`, `principal`, and `def_bonds_`
-  on the archived simulator coordinates and archived `eta`
-- The same helper then runs frozen `newton_inner` and `Hyper_pot_inner` on that archived geometric state
-  with `crit=1e-8` and `max_iter=100`, using the archived `eta` from `nano_config.dat` as the initial state
+  on the deformed simulator coordinates, then runs `newton_inner` and `Hyper_pot_inner` with `crit=1e-8`
+  and `max_iter=100`.
 
-This replaces the previous provenance-gap note for the geometry/bond slice with direct archived evidence:
-the C++ regression now rebuilds the same archived element-Gauss patches from the committed simulator files
-and compares them against Fortran-emitted constitutive fixtures under `archived_compression_np1/`.
+**Non-triviality guarantee**: the committed fixtures have `|curv0_elem[0]| > 1e-4` (element 83 yields
+`curv0_elem[0] ≈ -0.043`), confirming that the geometry state is genuinely deformed, not the flat
+undeformed initial configuration. The C++ regression asserts this property explicitly.

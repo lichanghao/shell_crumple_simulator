@@ -626,4 +626,32 @@ NewtonInnerOutput solve_inner_newton(const ElementState& state,
         });
 }
 
+OuterPotentialOutput evaluate_outer_potential(const MatData& mat, const Vec6& pe) {
+    if (mat.nCode_Pot == 1) {
+        validate_morse_material(mat);
+        OuterPotentialOutput out;
+        for (int i = 0; i < 3; ++i) {
+            const Vec3 vs = vstretch_bis(pe[i], mat);
+            out.W += vs[0];
+            out.dW[i] = vs[1];
+            const Vec3 va = vangle_bis(pe[3 + i], mat);
+            out.W += 2.0 * va[0];
+            out.dW[3 + i] = 2.0 * va[1];
+        }
+        out.W /= mat.s0;
+        for (double& d : out.dW) {
+            d /= mat.s0;
+        }
+        return out;
+    }
+    if (mat.nCode_Pot == 2) {
+        const BrennerOutput brenner = evaluate_brenner(mat, pe);
+        OuterPotentialOutput out;
+        out.W = brenner.W;
+        out.dW = brenner.dW;
+        return out;
+    }
+    throw std::invalid_argument("Only Morse nCode_Pot=1 and Brenner nCode_Pot=2 are supported for outer potential");
+}
+
 }  // namespace fce

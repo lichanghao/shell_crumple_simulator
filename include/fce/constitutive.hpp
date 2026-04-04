@@ -18,6 +18,11 @@ struct BrennerOutput {
     Mat66 ddW{};
 };
 
+struct OuterPotentialOutput {
+    double W{0.0};
+    Vec6 dW{};
+};
+
 struct InnerPotentialOutput {
     double W{0.0};
     Vec2 dWdeta{};
@@ -36,6 +41,10 @@ struct NewtonInnerOutput {
 };
 
 BrennerOutput evaluate_brenner(const MatData& mat, const Vec6& pe);
+
+// Outer potential (Hyper_Pot): W and dW/dpe without eta chain rule.
+// nCode_Pot == 1: Morse; nCode_Pot == 2: Brenner.
+OuterPotentialOutput evaluate_outer_potential(const MatData& mat, const Vec6& pe);
 
 InnerPotentialOutput evaluate_inner_potential(const Voigt3& C_elem,
                                               const Vec2& curvppal,
