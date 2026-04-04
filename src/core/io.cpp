@@ -580,8 +580,8 @@ void write_mesh(const std::string& path, const Mesh& mesh, int ngauss) {
         for (int j = 0; j < 12; ++j) {
             int gflag = el.neigh_elem[j];
             int ni    = el.neigh_vert[j];
-            // Convert back: real nodes (gflag==0, ni>=0) go back to 1-based
-            int ni_out = (gflag == 0 && ni >= 0) ? (ni + 1) : ni;
+            // Convert back: any valid (>= 0) neigh_vert goes to 1-based; -1 → 0
+            int ni_out = (ni >= 0) ? (ni + 1) : 0;
             f << std::setw(9) << gflag << std::setw(9) << ni_out << "\n";
         }
         f << std::setw(9) << el.code_bc[0]

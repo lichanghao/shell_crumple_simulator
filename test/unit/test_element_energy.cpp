@@ -1,5 +1,6 @@
 #include "fce/constitutive.hpp"
 #include "fce/element_energy.hpp"
+#include "fce/element_state.hpp"
 #include "fce/exponential.hpp"
 #include "fce/ghost_nodes.hpp"
 #include "fce/io.hpp"
@@ -354,4 +355,101 @@ TEST(ElementEnergy, NoInnerRelaxationProducesZeroEtaAndNonzeroW) {
 
     // inner_fail must be zero (no Newton was run)
     EXPECT_EQ(result.inner_fail, 0);
+}
+
+// ─── Test: f_elem is consistent with finite-difference derivative of W_elem ──────────────────
+
+TEST(ElementEnergy, ForcesAreConsistentWithEnergyByFiniteDifference) {
+    // For nW_hat=false (outer potential, fixed eta=0), the analytical forces in f_elem
+    // must agree with the centered finite-difference derivative of W_elem:
+    //   f_elem[inode][k] ≈ (W(x+h) - W(x-h)) / (2h)
+    // f_elem is the energy gradient (+dW/dx), not the particle force (-dW/dx).
+    // Centered FD has O(h²) truncation error; with h=1e-6 the floor is ~1e-12,
+    // well within the 1e-4 relative tolerance.
+    const auto& archive = archived_compression_state();
+    const auto& mat = archive.general.mat;
+    const int ngauss = archive.dims.ngauss;
+    const Voigt3 reference_curvature{0.0, 0.0, 0.0};
+    const int element_index = 82;  // element 83, 0-based
+
+    const auto xneigh_base = neighbor_patch_from_archive(archive, element_index);
+    const auto& f0 = archive.ref_config.at(static_cast<std::size_t>(element_index)).F0;
+    const std::vector<Vec2> eta0(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0});
+
+    const auto result_base = fce::compute_element_energy(
+        xneigh_base, f0, reference_curvature, archive.gauss,
+        mat, /*nW_hat=*/false, 1e-8, 100, eta0);
+    ASSERT_EQ(result_base.inner_fail, 0);
+
+    constexpr double h = 1e-6;
+    for (int inode = 0; inode < 12; ++inode) {
+        for (int k = 0; k < 3; ++k) {
+            auto xneigh_p = xneigh_base;
+            xneigh_p[inode][k] += h;
+            auto xneigh_m = xneigh_base;
+            xneigh_m[inode][k] -= h;
+
+            const auto result_p = fce::compute_element_energy(
+                xneigh_p, f0, reference_curvature, archive.gauss,
+                mat, /*nW_hat=*/false, 1e-8, 100, eta0);
+            const auto result_m = fce::compute_element_energy(
+                xneigh_m, f0, reference_curvature, archive.gauss,
+                mat, /*nW_hat=*/false, 1e-8, 100, eta0);
+
+            const double fd_force = (result_p.W_elem - result_m.W_elem) / (2.0 * h);
+            const double analytic  = result_base.f_elem[inode][k];
+            const double tol = 1e-4 * std::max(std::abs(fd_force), 1e-10);
+            EXPECT_NEAR(analytic, fd_force, tol)
+                << "inode=" << inode << " k=" << k
+                << " analytic=" << analytic << " fd=" << fd_force;
+        }
+    }
+}
+
+// ─── Test: flag_num_diff=true path (flat geometry, equal principal curvatures) ───────────────
+
+TEST(ElementEnergy, FlagNumDiffPathProducesFiniteEnergyAndForces) {
+    // For a flat (z=0) geometry, curv0_elem=0 → both principal curvatures=0 → beta=0
+    // → flag_num_diff=true.  compute_element_energy must produce finite W_elem and f_elem.
+    const auto& archive = archived_compression_state();
+    const auto& mat = archive.general.mat;
+    const int ngauss = archive.dims.ngauss;
+    const Voigt3 reference_curvature{0.0, 0.0, 0.0};
+    const int element_index = 82;  // element 83, 0-based
+
+    // Build flat xneigh: preserve x,y from archive but zero out z
+    auto xneigh_flat = neighbor_patch_from_archive(archive, element_index);
+    for (auto& node : xneigh_flat) {
+        node[2] = 0.0;
+    }
+    const auto& f0 = archive.ref_config.at(static_cast<std::size_t>(element_index)).F0;
+
+    // Confirm flag_num_diff is triggered at the first Gauss point of the flat geometry
+    {
+        const auto& sf = archive.gauss.shapef.at(0);
+        fce::ShapeGradient12 dn{};
+        fce::ShapeCurvature12 ddn{};
+        for (int inode = 0; inode < 12; ++inode) {
+            dn[inode]  = Vec2{sf[inode][1], sf[inode][2]};
+            ddn[inode] = Voigt3{sf[inode][3], sf[inode][4], sf[inode][5]};
+        }
+        const auto state = fce::compute_element_state(
+            xneigh_flat, dn, ddn, f0, reference_curvature);
+        ASSERT_TRUE(state.flag_num_diff)
+            << "flat (z=0) geometry must trigger flag_num_diff at Gauss point 0";
+    }
+
+    const std::vector<Vec2> eta0(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0});
+    const auto result = fce::compute_element_energy(
+        xneigh_flat, f0, reference_curvature, archive.gauss,
+        mat, /*nW_hat=*/true, 1e-8, 100, eta0);
+
+    EXPECT_TRUE(std::isfinite(result.W_elem)) << "W_elem must be finite in flag_num_diff path";
+    EXPECT_EQ(result.inner_fail, 0) << "inner Newton must converge for flat element";
+    for (int inode = 0; inode < 12; ++inode) {
+        for (int k = 0; k < 3; ++k) {
+            EXPECT_TRUE(std::isfinite(result.f_elem[inode][k]))
+                << "f_elem[" << inode << "][" << k << "] must be finite in flag_num_diff path";
+        }
+    }
 }
