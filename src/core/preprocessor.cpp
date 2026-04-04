@@ -727,17 +727,9 @@ void run_preprocessor(const std::string& work_dir)
         std::cout << "Wrote nano_BCs.dat\n";
     }
 
-    // nano_Mesh.dat
+    // nano_Mesh.dat — neigh_vert is stored 0-based in meshT; write_mesh adds +1 for all valid entries
     {
-        Mesh mesh_out = meshT;
-        for (auto& element : mesh_out.connect) {
-            for (int k = 0; k < 12; ++k) {
-                if (element.neigh_elem[k] != 0 && element.neigh_vert[k] >= 0) {
-                    element.neigh_vert[k] += 1;
-                }
-            }
-        }
-        io::write_mesh(sep + "nano_Mesh.dat", mesh_out, d.ngauss);
+        io::write_mesh(sep + "nano_Mesh.dat", meshT, d.ngauss);
         std::cout << "Wrote nano_Mesh.dat\n";
     }
 

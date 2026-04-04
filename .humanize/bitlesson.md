@@ -109,3 +109,13 @@ Solution: Keep the fixture-backed Brenner Hessian comparison at a tolerance cons
 Constraints: This lesson applies only when the oracle artifact is itself finite-difference-derived. If a future helper exposes exact Fortran Hessian terms, restore tighter direct parity tolerances.
 Validation Evidence: `Brenner.MatchesCommittedFortranOracleFixtures` and `Brenner.HessianMatchesFiniteDifference` both pass; full `ctest --test-dir build --output-on-failure` passes 46/46.
 Source Rounds: 11
+
+## Lesson: fortran-principal-flag-is-input-not-output
+Lesson ID: BL-20260404-principal-flag-input
+Scope: test/cases/tools/dump_element_energy_oracle.f90, principal.f90, ener_elem.f90
+Problem Description: When writing a Fortran oracle that reproduces the `flag_num_diff` numerical-diff path, using an uninitialized dummy variable (`flag_dummy`) for the `flag_num_diff` argument of `principal_` caused NaN vppal → NaN S_n/S_m for flat (z=0) geometry, even though the main loop correctly computed a finite W_elem.
+Root Cause: The Fortran `principal_` subroutine reads `flag_num_diff` as an INPUT to decide whether to use the stable eigenvector fallback. It does NOT recompute `flag_num_diff` from beta. Canonical `ener_elem.f90` passes the same `flag_num_diff` variable (set by the earlier `principal(...)` call). If an uninitialized variable is passed instead, `principal_` silently takes the standard (unstable) eigenvector path, which is ill-conditioned for degenerate curvatures and produces NaN vppal.
+Solution: In any oracle or translation calling `principal_` inside a numerical-diff loop, pass the already-computed `flag_num_diff` (from the preceding `principal(...)` call) — not a fresh uninitialized variable.
+Constraints: This applies specifically to the `principal_` subroutine in the canonical Fortran codebase. `principal` (the full version with derivatives) sets `flag_num_diff` as a side effect and does NOT have this input-dependency.
+Validation Evidence: `ElementEnergy.FlagNumDiffStressesMatchFortranOracle` passes with S_n/S_m within 1e-6 absolute and exact S_n==S_m equality after the fix; full suite 60/60 unit + 18/18 integration.
+Source Rounds: 26

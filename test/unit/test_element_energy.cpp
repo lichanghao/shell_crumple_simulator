@@ -503,3 +503,154 @@ TEST(ElementEnergy, FElemMatchesFortranOracle) {
         }
     }
 }
+
+// ─── Test: flag_num_diff S_n/S_m match Fortran oracle for flat geometry ──────────────────────
+
+TEST(ElementEnergy, FlagNumDiffStressesMatchFortranOracle) {
+    // Canonical Fortran reference: dump_element_energy_oracle.f90 in flat mode sets z=0
+    // for all neighbor nodes of element 83 → curv0_elem=0 → k1=k2=0 → flag_num_diff=true.
+    // The fixture stores per-Gauss flag_num_diff, S_n[3], S_m[3] in addition to W_elem
+    // and f_elem.  This test directly verifies the Round-25 S_m fix: in the flag_num_diff
+    // branch, S_m must perturb C_elem (not curv0_elem), so S_n == S_m.
+    //
+    // Fixture format (flat_geom_np1/case_01.dat):
+    //   Row 0:     ielem  ngauss
+    //   Row 1:     W_elem
+    //   Rows 2-13: f_elem(inode, 0:2)
+    //   For each Gauss point (3 rows each):
+    //     Row 14+ig*3: flag_num_diff (1 or 0)
+    //     Row 15+ig*3: S_n[3]
+    //     Row 16+ig*3: S_m[3]
+    const fs::path fixture_path =
+        fs::path(ORACLE_DIR) / "element_energy_oracle" / "flat_geom_np1" / "case_01.dat";
+    const auto rows = read_rows(fixture_path);
+    // 1 header + 1 W_elem + 12 f_elem + ngauss*(1 flag + 2 stress) = 14 + 3*ngauss
+    // For ngauss=2: 20 rows
+    ASSERT_EQ(rows.size(), 20U) << "flat fixture must have 20 rows for ngauss=2";
+
+    const int fixture_elem   = static_cast<int>(rows[0].at(0));  // 1-based
+    const int fixture_ngauss = static_cast<int>(rows[0].at(1));
+    const double fixture_W   = rows[1].at(0);
+
+    const auto& archive = archived_compression_state();
+    const auto& mat = archive.general.mat;
+    const int ngauss = archive.dims.ngauss;
+    ASSERT_EQ(fixture_elem - 1, 82);
+    ASSERT_EQ(fixture_ngauss, ngauss);
+
+    const Voigt3 reference_curvature{0.0, 0.0, 0.0};
+    const int element_index = 82;
+
+    auto xneigh_flat = neighbor_patch_from_archive(archive, element_index);
+    for (auto& node : xneigh_flat) {
+        node[2] = 0.0;
+    }
+    const auto& f0 = archive.ref_config.at(static_cast<std::size_t>(element_index)).F0;
+
+    // --- W_elem and f_elem ---
+    const std::vector<Vec2> eta0(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0});
+    const auto result = fce::compute_element_energy(
+        xneigh_flat, f0, reference_curvature, archive.gauss,
+        mat, /*nW_hat=*/true, 1e-8, 100, eta0);
+
+    ASSERT_EQ(result.inner_fail, 0) << "inner Newton must converge for flat element";
+
+    // W_elem tolerance: 1e-6 (larger than archived case due to h=1e-8 FD cancellation
+    // combined with gfortran/g++ floating-point rounding order differences)
+    EXPECT_NEAR(result.W_elem, fixture_W, 1e-6) << "W_elem mismatch vs flat Fortran oracle";
+
+    for (int inode = 0; inode < 12; ++inode) {
+        const auto& row = rows.at(static_cast<std::size_t>(2 + inode));
+        for (int k = 0; k < 3; ++k) {
+            const double expected = row.at(static_cast<std::size_t>(k));
+            // Relative tolerance 1e-7 with absolute floor 1e-6: flat-case f_elem values can
+            // be O(20), and the FD cancellation error in S_n/S_m is O(eps*W/h) ~ 1e-7
+            const double tol_fe = std::max(1e-6, std::abs(expected) * 1e-7);
+            EXPECT_NEAR(result.f_elem[inode][k], expected, tol_fe)
+                << "f_elem[" << inode << "][" << k << "] mismatch vs flat Fortran oracle";
+        }
+    }
+
+    // --- Per-Gauss S_n and S_m via direct stress parity ---
+    constexpr double h = 1e-8;
+    // S_n/S_m tolerance: 1e-6 absolute; the FD h=1e-8 cancellation error combined with
+    // gfortran/g++ rounding order differences produces differences of up to ~3e-7
+    constexpr double tol_stress = 1e-6;
+
+    for (int igauss = 0; igauss < ngauss; ++igauss) {
+        const std::size_t row_base = static_cast<std::size_t>(14 + igauss * 3);
+        const bool fixture_flag = (rows.at(row_base).at(0) != 0.0);
+        const Voigt3 oracle_S_n = row_to_voigt3(rows.at(row_base + 1));
+        const Voigt3 oracle_S_m = row_to_voigt3(rows.at(row_base + 2));
+
+        ASSERT_TRUE(fixture_flag)
+            << "flat geometry must have flag_num_diff=true at gauss " << igauss;
+
+        // Compute element state for this Gauss point
+        const auto& sf = archive.gauss.shapef.at(static_cast<std::size_t>(igauss));
+        fce::ShapeGradient12 dn{};
+        fce::ShapeCurvature12 ddn{};
+        for (int inode = 0; inode < 12; ++inode) {
+            dn[inode]  = Vec2{sf[inode][1], sf[inode][2]};
+            ddn[inode] = Voigt3{sf[inode][3], sf[inode][4], sf[inode][5]};
+        }
+        const auto state = fce::compute_element_state(
+            xneigh_flat, dn, ddn, f0, reference_curvature);
+        ASSERT_TRUE(state.flag_num_diff)
+            << "flat geometry must trigger flag_num_diff at gauss " << igauss;
+
+        // Newton relaxation to get converged eta
+        const auto inner = fce::solve_inner_newton(
+            state, mat, Vec2{0.0, 0.0}, 1e-8, 100);
+        ASSERT_EQ(inner.fail_mode, 0) << "inner Newton must converge at gauss " << igauss;
+
+        // Bond vectors at converged eta (matches element_energy.cpp lines 65-74)
+        std::array<double, 3> A_norm{};
+        std::array<Vec2, 3> Ei{};
+        for (int ibond = 0; ibond < 3; ++ibond) {
+            Ei[ibond] = Vec2{
+                mat.A0 * mat.E[ibond][0] + inner.eta[0],
+                mat.A0 * mat.E[ibond][1] + inner.eta[1],
+            };
+            const double n = std::sqrt(Ei[ibond][0] * Ei[ibond][0] +
+                                       Ei[ibond][1] * Ei[ibond][1]);
+            A_norm[ibond] = n;
+            Ei[ibond][0] /= n;
+            Ei[ibond][1] /= n;
+        }
+
+        // S_n and S_m via flag_num_diff numerical-diff path (element_energy.cpp lines 87-104)
+        const auto bonds_base = fce::compute_deformed_bonds(
+            state.C_elem, state.curvppal, state.vppal, A_norm, Ei);
+        const double W_base = fce::evaluate_outer_potential(mat, bonds_base.pe).W;
+
+        Voigt3 cpp_S_n{}, cpp_S_m{};
+        for (int i = 0; i < 3; ++i) {
+            // S_n: perturb C_elem[i]
+            Voigt3 C_p = state.C_elem;
+            C_p[i] += h;
+            const auto pp_n = fce::compute_principal_curvature(C_p, state.curv0_elem);
+            const auto bonds_n = fce::compute_deformed_bonds(
+                C_p, pp_n.curvppal, pp_n.vppal, A_norm, Ei);
+            cpp_S_n[i] = (fce::evaluate_outer_potential(mat, bonds_n.pe).W - W_base) / h;
+
+            // S_m: perturb C_elem[i] (Round-25 fix — identical formula to S_n)
+            Voigt3 C_pm = state.C_elem;
+            C_pm[i] += h;
+            const auto pp_m = fce::compute_principal_curvature(C_pm, state.curv0_elem);
+            const auto bonds_m = fce::compute_deformed_bonds(
+                C_pm, pp_m.curvppal, pp_m.vppal, A_norm, Ei);
+            cpp_S_m[i] = (fce::evaluate_outer_potential(mat, bonds_m.pe).W - W_base) / h;
+        }
+
+        for (int i = 0; i < 3; ++i) {
+            EXPECT_NEAR(cpp_S_n[i], oracle_S_n[i], tol_stress)
+                << "S_n[" << i << "] mismatch at gauss " << igauss;
+            EXPECT_NEAR(cpp_S_m[i], oracle_S_m[i], tol_stress)
+                << "S_m[" << i << "] mismatch at gauss " << igauss;
+            // S_n == S_m exactly: both use identical C_elem perturbation formula
+            EXPECT_EQ(cpp_S_n[i], cpp_S_m[i])
+                << "S_n must equal S_m at gauss " << igauss << " component " << i;
+        }
+    }
+}

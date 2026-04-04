@@ -1,21 +1,32 @@
 program dump_element_energy_oracle
   ! Computes ener_elem for element 83 (1-based) from the archived compression
-  ! simulator state and dumps W_elem and f_elem to a fixture file.
+  ! simulator state and dumps W_elem and f_elem to fixture files.
   !
-  ! This is the canonical Fortran reference for C++ test
-  ! ElementEnergy.FElemMatchesFortranOracle.
+  ! This is the canonical Fortran reference for C++ tests:
+  !   ElementEnergy.FElemMatchesFortranOracle           (analytical path)
+  !   ElementEnergy.FlagNumDiffStressesMatchFortranOracle (numerical-diff path)
   !
   ! The computation mirrors ener_elem.f90 without the data_crease module
   ! (ncrease=0 is assumed for the compression test) and without energy.f90
   ! (which contains MPI). Hyper_Pot and Stresses are reproduced inline.
   !
   ! Usage:
-  !   dump_element_energy_oracle <case-dir> <out-dir>
+  !   dump_element_energy_oracle <case-dir> <oracle-dir>
   !
-  ! Fixture format (case_01.dat):
-  !   Line 1:  ielem  ngauss         (integers, 1-based element index)
-  !   Line 2:  W_elem                (one double)
-  !   Lines 3-14: f_elem(inode,1:3)  (one row per node, 3 doubles each)
+  ! Outputs:
+  !   <oracle-dir>/archived_compression_np1/case_01.dat
+  !     Line 1:  ielem  ngauss
+  !     Line 2:  W_elem
+  !     Lines 3-14: f_elem(inode,1:3)
+  !
+  !   <oracle-dir>/flat_geom_np1/case_01.dat
+  !     Line 1:  ielem  ngauss
+  !     Line 2:  W_elem
+  !     Lines 3-14: f_elem(inode,1:3)
+  !     For each Gauss point (3 lines each):
+  !       flag_num_diff (0 or 1)
+  !       S_n(1:3)
+  !       S_m(1:3)
 
   use data_mat
   use data_vector2
@@ -114,7 +125,7 @@ program dump_element_energy_oracle
   ! Target element (1-based)
   integer, parameter :: target_ielem = 83
 
-  character(len=512) :: case_dir, out_dir, out_path
+  character(len=512) :: case_dir, oracle_dir, out_path
 
   integer :: numele, numnods, ngauss
   integer :: ielem, igauss, ibond, ij, inode
@@ -132,7 +143,11 @@ program dump_element_energy_oracle
   real(8), allocatable :: shapef(:, :, :)
   real(8), allocatable :: weight(:)
 
-  real(8) :: xneigh(12, 3)
+  ! Per-Gauss stress storage (flat case)
+  real(8), allocatable :: S_n_gauss(:, :), S_m_gauss(:, :)
+  integer, allocatable :: flag_nd_gauss(:)
+
+  real(8) :: xneigh(12, 3), xneigh_flat(12, 3)
   real(8) :: DN(12, 2), DDN(12, 3)
   real(8) :: C_elem(3), curv0_elem(3), xnor_elem(3)
   real(8) :: curvppal(2), vppal(2, 2)
@@ -143,14 +158,15 @@ program dump_element_energy_oracle
   real(8) :: eta_gauss(2)
   real(8) :: W, W_
   real(8) :: f_elem(12, 3), W_elem
+  real(8) :: f_elem_flat(12, 3), W_elem_flat
   logical :: flag_num_diff, flag_dummy
   real(8), parameter :: crit = 1.0d-8
   real(8), parameter :: h = 1.0d-8
 
   call get_command_argument(1, case_dir)
-  call get_command_argument(2, out_dir)
-  if ((len_trim(case_dir) == 0) .or. (len_trim(out_dir) == 0)) then
-    stop "usage: dump_element_energy_oracle <case-dir> <out-dir>"
+  call get_command_argument(2, oracle_dir)
+  if ((len_trim(case_dir) == 0) .or. (len_trim(oracle_dir) == 0)) then
+    stop "usage: dump_element_energy_oracle <case-dir> <oracle-dir>"
   end if
 
   call read_dims(trim(case_dir) // "/nano_dims.dat", numele, numnods, ngauss)
@@ -159,6 +175,9 @@ program dump_element_energy_oracle
   allocate(F0(2, 2, numele))
   allocate(shapef(ngauss, 12, 6))
   allocate(weight(ngauss))
+  allocate(S_n_gauss(3, ngauss))
+  allocate(S_m_gauss(3, ngauss))
+  allocate(flag_nd_gauss(ngauss))
 
   call read_general_material(trim(case_dir) // "/nano_general.dat", mat1)
   call read_zero(trim(case_dir) // "/nano_zero.dat", numele, F0)
@@ -172,7 +191,8 @@ program dump_element_energy_oracle
     xneigh(inode, :) = x0(neigh_vert(inode, ielem), :)
   end do
 
-  ! Compute ener_elem inline (ncrease=0, no crease subtraction needed)
+  ! ─── Case 1: archived deformed state (analytical path, flag_num_diff=false) ───
+
   f_elem = 0.0d0
   W_elem = 0.0d0
   inner_fail = 0
@@ -186,12 +206,12 @@ program dump_element_energy_oracle
     call principal(C_elem, curv0_elem, curvppal, vppal, &
                    dcurvppaldC, dcurvppaldk, dvppaldC, dvppaldk, flag_num_diff)
 
-    ! Inner Newton from eta=0 (matches C++ test initial condition)
+    ! Inner Newton from eta=0
     eta_gauss = 0.0d0
     maxn = 100
     call newton_inner(C_elem, curvppal, vppal, mat1, eta_gauss, W, dW, crit, niter, maxn, fail_mode)
     if (fail_mode /= 0) then
-      write(*, *) "WARNING: newton_inner fail for igauss=", igauss, " fail_mode=", fail_mode
+      write(*, *) "WARNING: newton_inner fail for archived igauss=", igauss, " fail_mode=", fail_mode
       inner_fail = inner_fail + 1
     end if
 
@@ -211,7 +231,8 @@ program dump_element_energy_oracle
         C_elem_ = C_elem
         curv0_elem_ = curv0_elem
         C_elem_(ij) = C_elem_(ij) + h
-        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_dummy)
+        ! Pass flag_num_diff so principal_ uses the stable fallback (matches canonical ener_elem.f90)
+        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_num_diff)
         call def_bonds_(C_elem_, curvppal_, vppal_, A_norm, Ei, pe_)
         call My_Hyper_Pot(mat1, pe_, W_, dW_)
         S_n(ij) = (W_ - W) / h
@@ -220,7 +241,7 @@ program dump_element_energy_oracle
         C_elem_ = C_elem
         curv0_elem_ = curv0_elem
         C_elem_(ij) = C_elem_(ij) + h
-        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_dummy)
+        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_num_diff)
         call def_bonds_(C_elem_, curvppal_, vppal_, A_norm, Ei, pe_)
         call My_Hyper_Pot(mat1, pe_, W_, dW_)
         S_m(ij) = (W_ - W) / h
@@ -241,14 +262,104 @@ program dump_element_energy_oracle
   end do
 
   if (inner_fail /= 0) then
-    write(*, *) "ERROR: inner Newton failed for", inner_fail, "Gauss point(s)"
+    write(*, *) "ERROR: archived case inner Newton failed for", inner_fail, "Gauss point(s)"
     stop
   end if
 
-  call execute_command_line("mkdir -p " // trim(out_dir))
-  write(out_path, "(A,'/case_01.dat')") trim(out_dir)
+  call execute_command_line("mkdir -p " // trim(oracle_dir) // "/archived_compression_np1")
+  write(out_path, "(A,A)") trim(oracle_dir), "/archived_compression_np1/case_01.dat"
   call write_fixture(out_path, ielem, ngauss, W_elem, f_elem)
-  write(*, "(A,ES14.6)") "W_elem = ", W_elem
+  write(*, "(A,ES14.6)") "archived W_elem = ", W_elem
+
+  ! ─── Case 2: flat geometry (z=0, flag_num_diff=true) ───
+
+  xneigh_flat = xneigh
+  xneigh_flat(:, 3) = 0.0d0
+
+  f_elem_flat = 0.0d0
+  W_elem_flat = 0.0d0
+  inner_fail = 0
+
+  do igauss = 1, ngauss
+    DN(:, :)  = shapef(igauss, :, 2:3)
+    DDN(:, :) = shapef(igauss, :, 4:6)
+
+    call metric(xneigh_flat, DN, F0(:, :, ielem), C_elem, dC, xnor_elem, dnorm)
+    call curv(xneigh_flat, DDN, F0(:, :, ielem), xnor_elem, dnorm, curv0_elem, dcurv)
+    call principal(C_elem, curv0_elem, curvppal, vppal, &
+                   dcurvppaldC, dcurvppaldk, dvppaldC, dvppaldk, flag_num_diff)
+
+    ! Inner Newton from eta=0
+    eta_gauss = 0.0d0
+    maxn = 100
+    call newton_inner(C_elem, curvppal, vppal, mat1, eta_gauss, W, dW, crit, niter, maxn, fail_mode)
+    if (fail_mode /= 0) then
+      write(*, *) "WARNING: newton_inner fail for flat igauss=", igauss, " fail_mode=", fail_mode
+      inner_fail = inner_fail + 1
+    end if
+
+    ! Bond vectors at converged eta
+    do ibond = 1, 3
+      Ei(ibond, :) = mat1%A0 * mat1%E(ibond, :) + eta_gauss(:)
+      A_norm(ibond) = sqrt(Ei(ibond, 1)**2 + Ei(ibond, 2)**2)
+      Ei(ibond, :) = Ei(ibond, :) / A_norm(ibond)
+    end do
+
+    if (flag_num_diff) then
+      ! Numerical differentiation path (canonical ener_elem.f90 lines 60-84)
+      call def_bonds_(C_elem, curvppal, vppal, A_norm, Ei, pe)
+      call My_Hyper_Pot(mat1, pe, W, dW)
+      do ij = 1, 3
+        C_elem_ = C_elem
+        curv0_elem_ = curv0_elem
+        C_elem_(ij) = C_elem_(ij) + h
+        ! Pass flag_num_diff so principal_ uses the stable fallback (matches canonical ener_elem.f90)
+        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_num_diff)
+        call def_bonds_(C_elem_, curvppal_, vppal_, A_norm, Ei, pe_)
+        call My_Hyper_Pot(mat1, pe_, W_, dW_)
+        S_n(ij) = (W_ - W) / h
+      end do
+      do ij = 1, 3
+        C_elem_ = C_elem
+        curv0_elem_ = curv0_elem
+        C_elem_(ij) = C_elem_(ij) + h
+        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_num_diff)
+        call def_bonds_(C_elem_, curvppal_, vppal_, A_norm, Ei, pe_)
+        call My_Hyper_Pot(mat1, pe_, W_, dW_)
+        S_m(ij) = (W_ - W) / h
+      end do
+    else
+      write(*, *) "ERROR: flat geometry did not trigger flag_num_diff at igauss=", igauss
+      stop
+    end if
+
+    ! Save per-Gauss stresses for fixture output
+    S_n_gauss(:, igauss) = S_n
+    S_m_gauss(:, igauss) = S_m
+    if (flag_num_diff) then
+      flag_nd_gauss(igauss) = 1
+    else
+      flag_nd_gauss(igauss) = 0
+    end if
+
+    ! Force and energy accumulation
+    do ij = 1, 3
+      f_elem_flat = f_elem_flat + &
+        (S_n(ij)*dC(:, :)%val(ij) + S_m(ij)*dcurv(:, :)%val(ij)) * weight(igauss)
+    end do
+    W_elem_flat = W_elem_flat + W * weight(igauss)
+  end do
+
+  if (inner_fail /= 0) then
+    write(*, *) "ERROR: flat case inner Newton failed for", inner_fail, "Gauss point(s)"
+    stop
+  end if
+
+  call execute_command_line("mkdir -p " // trim(oracle_dir) // "/flat_geom_np1")
+  write(out_path, "(A,A)") trim(oracle_dir), "/flat_geom_np1/case_01.dat"
+  call write_stress_fixture(out_path, ielem, ngauss, W_elem_flat, f_elem_flat, &
+                            flag_nd_gauss, S_n_gauss, S_m_gauss)
+  write(*, "(A,ES14.6)") "flat    W_elem = ", W_elem_flat
 
 contains
 
@@ -313,6 +424,35 @@ contains
     end do
     close(20)
   end subroutine write_fixture
+
+  ! Extended fixture: W_elem + f_elem + per-Gauss (flag_num_diff, S_n, S_m).
+  ! For each Gauss point (3 lines per Gauss):
+  !   integer flag_num_diff (0 or 1)
+  !   S_n(1:3)
+  !   S_m(1:3)
+  subroutine write_stress_fixture(path, ielem_out, ngauss_out, W_elem_out, f_elem_out, &
+                                  flag_nd, Sn, Sm)
+    character(len=*), intent(in) :: path
+    integer, intent(in) :: ielem_out, ngauss_out
+    real(8), intent(in) :: W_elem_out
+    real(8), intent(in) :: f_elem_out(12, 3)
+    integer, intent(in) :: flag_nd(ngauss_out)
+    real(8), intent(in) :: Sn(3, ngauss_out), Sm(3, ngauss_out)
+    integer :: node, ig
+
+    open(unit=21, file=path, status="replace", action="write")
+    write(21, "(2I8)") ielem_out, ngauss_out
+    write(21, "(ES32.17E3)") W_elem_out
+    do node = 1, 12
+      write(21, "(3ES32.17E3)") f_elem_out(node, 1), f_elem_out(node, 2), f_elem_out(node, 3)
+    end do
+    do ig = 1, ngauss_out
+      write(21, "(I8)") flag_nd(ig)
+      write(21, "(3ES32.17E3)") Sn(1, ig), Sn(2, ig), Sn(3, ig)
+      write(21, "(3ES32.17E3)") Sm(1, ig), Sm(2, ig), Sm(3, ig)
+    end do
+    close(21)
+  end subroutine write_stress_fixture
 
   subroutine read_dims(path, numele, numnods, ngauss)
     character(len=*), intent(in) :: path

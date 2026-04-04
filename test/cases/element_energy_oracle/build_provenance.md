@@ -8,38 +8,69 @@
 
 ## Fixture Scope
 
-`archived_compression_np1/case_01.dat` is the canonical Fortran reference for the
-`ElementEnergy.FElemMatchesFortranOracle` C++ test.
+### `archived_compression_np1/case_01.dat`
+
+Canonical Fortran reference for `ElementEnergy.FElemMatchesFortranOracle`.
 
 - **Element**: 83 (1-based), the first interior element in the compressed graphene mesh
 - **ngauss**: 2
 - **Path**: analytical stresses (`flag_num_diff=false`): `def_bonds` + `Stresses` +
   `Hyper_Pot` (inline Morse wrapper, nCode_Pot=1)
-- **Initial condition**: `eta=0` per Gauss point (same as `compute_element_energy` test)
-- **Source**: `nano_final_config.dat` (deformed state, same source as the constitutive oracle)
-
-**Outputs stored**:
-- `W_elem`: total element energy (sum over Gauss points of `W * weight`)
-- `f_elem(12, 3)`: force accumulation for all 12 neighbor nodes × 3 directions
+- **Initial condition**: `eta=0` per Gauss point
+- **Source**: `nano_final_config.dat` (deformed state)
+- **Format**: header (ielem ngauss) + W_elem + 12 f_elem rows (14 rows total)
 
 **flag_num_diff note**: Element 83 has non-trivial curvature (`|curv0_elem[0]| ≈ 0.043`),
 so principal curvatures are distinct and `flag_num_diff=false`. The oracle uses the
-analytical path. The C++ `flag_num_diff=true` path is tested separately in
-`FlagNumDiffPathProducesFiniteEnergyAndForces` (smoke test, no Fortran oracle needed
-because this path fires only for near-flat geometry absent from the archived simulator run).
+analytical path.
+
+### `flat_geom_np1/case_01.dat`
+
+Canonical Fortran reference for `ElementEnergy.FlagNumDiffStressesMatchFortranOracle`.
+Verifies the Round-25 S_m fix: S_m must perturb `C_elem` (not `curv0_elem`), so
+S_n == S_m in the `flag_num_diff=true` branch.
+
+- **Element**: 83 (1-based), same connectivity as archived case
+- **ngauss**: 2
+- **Geometry**: element 83 x,y from `nano_final_config.dat` but z=0 (flat)
+- **Path**: numerical differentiation (`flag_num_diff=true`): `curv0_elem=0` →
+  `k1=k2=0` → both S_n and S_m loops perturb `C_elem_`
+- **Initial condition**: `eta=0` per Gauss point
+- **Source**: `nano_final_config.dat` (deformed state), z zeroed
+- **Format**: header + W_elem + 12 f_elem rows + per-Gauss stresses (20 rows total):
+  ```
+  Row 0:     ielem  ngauss
+  Row 1:     W_elem
+  Rows 2-13: f_elem(inode, 0:2)
+  For each Gauss point (3 rows each):
+    Row 14+ig*3: flag_num_diff (1 or 0)
+    Row 15+ig*3: S_n[3]
+    Row 16+ig*3: S_m[3]
+  ```
 
 **S_m note**: In the canonical `ener_elem.f90` (lines 76-84), the bending-stress S_m loop
 is identical to the membrane-stress S_n loop: both perturb `C_elem_`. This is a probable
 copy-paste defect in the Fortran (for bending stress, perturbing `curv0_elem_` is more
-physical), but since the oracle uses the analytical path (`flag_num_diff=false`), the S_m
-loop in `ener_elem.f90` is never reached for element 83. The C++ implementation was
-updated in Round 25 to match the Fortran exactly in the `flag_num_diff` branch.
+physical), but for oracle fidelity the C++ implementation matches this exactly. The
+fixture confirms S_n == S_m for both Gauss points of the flat element.
+
+**principal_ note**: The Fortran `principal_` subroutine takes `flag_num_diff` as an
+INPUT (not output) to decide which vppal branch to use. In the numerical-diff loop, the
+canonical ener_elem.f90 passes the same `flag_num_diff` variable (set by the earlier
+`principal(...)` call). The oracle does the same. If `flag_dummy` (uninitialized) is
+passed instead, `principal_` may take the wrong branch and produce NaN vppal.
+
+**Tolerance note**: The `FlagNumDiffStressesMatchFortranOracle` test uses 1e-6 absolute
+tolerance for S_n/S_m and 1e-6-relative for f_elem. The inherent truncation and
+rounding error of one-sided FD with h=1e-8 causes gfortran/g++ to produce values that
+differ by up to ~3e-7. The exact equality `S_n[i] == S_m[i]` (CPU registers, same
+code path) is still asserted.
 
 ## Reproduction
 
 ```bash
 mkdir -p /tmp/elem_energy_mods
-gfortran -std=legacy -O0 -J /tmp/elem_energy_mods -c \
+cd /tmp && gfortran -std=legacy -O0 -J /tmp/elem_energy_mods -c \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/headers.f90 \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/Taylor.f90 \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/BSpline.f90 \
@@ -53,13 +84,13 @@ gfortran -std=legacy -O0 -J /tmp/elem_energy_mods -c \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/mm3.f90 \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/Hyper_pot_inner_alg.f90 \
   ../finite_crystal_elasticity/grapheneCompressionOriginVersion/newton_inner.f90 \
-  test/cases/tools/dump_element_energy_oracle.f90
+  ../finite_crystal_elasticity_Cpp/test/cases/tools/dump_element_energy_oracle.f90
 gfortran -std=legacy -O0 -J /tmp/elem_energy_mods \
-  -o /tmp/dump_element_energy_oracle *.o
-rm -f *.o
+  -o /tmp/dump_element_energy_oracle /tmp/*.o
+# Write both fixtures (oracle-dir is the parent of archived_compression_np1 and flat_geom_np1)
 /tmp/dump_element_energy_oracle \
-  test/cases/graphene_compression_simulator/np1 \
-  test/cases/element_energy_oracle/archived_compression_np1
+  ../finite_crystal_elasticity_Cpp/test/cases/graphene_compression_simulator/np1 \
+  ../finite_crystal_elasticity_Cpp/test/cases/element_energy_oracle
 ```
 
 Note: `energy.f90` (which contains `Hyper_Pot` and `Stresses` but also an MPI include) is
