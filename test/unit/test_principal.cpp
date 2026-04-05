@@ -272,6 +272,60 @@ TEST(Principal, MatchesArchivedCompressionFortranOracle) {
     }
 }
 
+TEST(Principal, FlagNumDiffMatchesFortranOracle) {
+    // Reads the flag_num_diff_case fixture: flat geometry (curv0_elem=[0,0,0])
+    // where beta=0 < 1e-6 so Fortran sets flag_num_diff=true.
+    // Verifies C++ also sets flag_num_diff=true and produces correct outputs within 1e-12.
+    const fs::path fixture_dir =
+        fs::path(ORACLE_DIR) / "principal_oracle" / "flag_num_diff_case";
+    const auto fixtures = pexp_sorted_fixture_paths(fixture_dir);
+    ASSERT_GE(fixtures.size(), 1U) << "flag_num_diff_case directory has no fixtures";
+
+    constexpr double tol = 1e-12;
+
+    for (const auto& path : fixtures) {
+        const auto f = read_pexp_fixture(path);
+
+        // The fixture must genuinely be a flag_num_diff=true case.
+        ASSERT_TRUE(f.flag_num_diff)
+            << path.string() << ": fixture does not have flag_num_diff=true";
+
+        const auto result = fce::compute_principal_curvature(f.C_elem, f.curv0_elem);
+
+        EXPECT_TRUE(result.flag_num_diff) << path.string() << ": C++ did not set flag_num_diff";
+
+        // Curvatures must match.
+        for (int i = 0; i < 2; ++i) {
+            EXPECT_NEAR(result.curvppal[i], f.curvppal[i], tol)
+                << path.string() << " curvppal[" << i << "]";
+        }
+
+        // Principal directions must match (both zero in the flat case).
+        for (int i = 0; i < 2; ++i) {
+            for (int comp = 0; comp < 2; ++comp) {
+                EXPECT_NEAR(result.vppal[i][comp], f.vppal[i][comp], tol)
+                    << path.string() << " vppal[" << i << "][" << comp << "]";
+            }
+        }
+
+        // All derivatives must be zero in the flag_num_diff branch.
+        for (int i = 0; i < 2; ++i) {
+            for (int j = 0; j < 3; ++j) {
+                EXPECT_NEAR(result.dcurvppaldC[i][j], f.dcurvppaldC[i][j], tol)
+                    << path.string() << " dcurvppaldC[" << i << "][" << j << "]";
+                EXPECT_NEAR(result.dcurvppaldk[i][j], f.dcurvppaldk[i][j], tol)
+                    << path.string() << " dcurvppaldk[" << i << "][" << j << "]";
+                for (int comp = 0; comp < 2; ++comp) {
+                    EXPECT_NEAR(result.dvppaldC[i][comp][j], f.dvppaldC[i][comp][j], tol)
+                        << path.string() << " dvppaldC[" << i << "][" << comp << "][" << j << "]";
+                    EXPECT_NEAR(result.dvppaldk[i][comp][j], f.dvppaldk[i][comp][j], tol)
+                        << path.string() << " dvppaldk[" << i << "][" << comp << "][" << j << "]";
+                }
+            }
+        }
+    }
+}
+
 TEST(Principal, DirectionDerivativesMatchFiniteDifference) {
     const Voigt3 C_elem{1.1, 0.9, 0.1};
     const Voigt3 curv0_elem{0.23, 0.11, 0.04};

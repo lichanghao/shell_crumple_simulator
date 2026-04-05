@@ -45,6 +45,8 @@ add_library(fce_core
   src/core/geometry.cpp
   src/core/ghost_nodes.cpp
   src/core/io.cpp
+  src/core/lbfgs.cpp
+  src/core/load_controller.cpp
   src/core/load_pre.cpp
   src/core/mesh_generator.cpp
   src/core/mpi_env.cpp
@@ -53,6 +55,7 @@ add_library(fce_core
   src/core/quadrature.cpp
   src/core/reference_config.cpp
   src/core/simulator.cpp
+  src/core/solver.cpp
   src/core/taylor.cpp
   src/core/vdw_preprocessor.cpp
 )
@@ -94,6 +97,7 @@ add_executable(unit_tests
   test/unit/test_geometry.cpp
   test/unit/test_ghost_nodes.cpp
   test/unit/test_io.cpp
+  test/unit/test_lbfgs.cpp
   test/unit/test_mpi_env.cpp
   test/unit/test_principal.cpp
   test/unit/test_reference_config.cpp
@@ -110,6 +114,7 @@ add_executable(integration_tests
   test/support/oracle_compare.cpp
   test/integration/test_oracle_roundtrip.cpp
   test/integration/test_prepro_oracle.cpp
+  test/integration/test_e2e_compression.cpp
 )
 target_link_libraries(integration_tests PRIVATE
   fce_core
