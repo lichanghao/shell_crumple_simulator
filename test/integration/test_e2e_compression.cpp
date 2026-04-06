@@ -35,6 +35,11 @@ struct DataRow {
     std::vector<double> values;
 };
 
+struct PvdDataset {
+    double timestep{0.0};
+    std::string file;
+};
+
 std::vector<DataRow> read_numeric_rows(const fs::path& path, const bool skip_header) {
     std::ifstream in(path);
     if (!in) {
@@ -109,9 +114,123 @@ std::string read_file(const fs::path& path) {
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
+std::vector<double> parse_numeric_payload(const std::string& payload) {
+    std::istringstream in(payload);
+    std::vector<double> values;
+    std::string token;
+    while (in >> token) {
+        values.push_back(fce::io::parse_fortran_double(token));
+    }
+    return values;
+}
+
+std::string extract_xml_data_array_payload(const std::string& xml, const std::string& marker) {
+    const std::size_t marker_pos = xml.find(marker);
+    if (marker_pos == std::string::npos) {
+        throw std::runtime_error("cannot find XML marker: " + marker);
+    }
+    const std::size_t data_begin = xml.find('>', marker_pos);
+    const std::size_t data_end = xml.find("</DataArray>", data_begin);
+    if (data_begin == std::string::npos || data_end == std::string::npos) {
+        throw std::runtime_error("invalid DataArray payload for marker: " + marker);
+    }
+    return xml.substr(data_begin + 1, data_end - data_begin - 1);
+}
+
+double read_vtu_time_value(const fs::path& path) {
+    const std::string xml = read_file(path);
+    const auto values = parse_numeric_payload(
+        extract_xml_data_array_payload(xml, "Name=\"TimeValue\""));
+    if (values.size() != 1) {
+        throw std::runtime_error("unexpected TimeValue payload size in " + path.string());
+    }
+    return values[0];
+}
+
+std::vector<fce::Vec3> read_vtu_inner_displacement(const fs::path& path) {
+    const std::string xml = read_file(path);
+    const auto values = parse_numeric_payload(
+        extract_xml_data_array_payload(xml, "Name=\"inner_displacement\""));
+    if (values.size() % 3 != 0) {
+        throw std::runtime_error("inner_displacement payload is not a multiple of 3 in " +
+                                 path.string());
+    }
+
+    std::vector<fce::Vec3> out(values.size() / 3);
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        out[i] = fce::Vec3{
+            values[3 * i],
+            values[3 * i + 1],
+            values[3 * i + 2],
+        };
+    }
+    return out;
+}
+
+std::vector<fce::Vec3> read_vtu_points(const fs::path& path, const int expected_points) {
+    const std::string xml = read_file(path);
+    const auto values = parse_numeric_payload(
+        extract_xml_data_array_payload(xml, "NumberOfComponents=\"3\" format=\"ascii\""));
+    if (static_cast<int>(values.size()) < expected_points * 3) {
+        throw std::runtime_error("VTU points payload is shorter than expected in " + path.string());
+    }
+
+    std::vector<fce::Vec3> out(static_cast<std::size_t>(expected_points));
+    for (int i = 0; i < expected_points; ++i) {
+        out[static_cast<std::size_t>(i)] = fce::Vec3{
+            values[3 * i],
+            values[3 * i + 1],
+            values[3 * i + 2],
+        };
+    }
+    return out;
+}
+
+std::vector<PvdDataset> read_pvd_datasets(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open pvd file: " + path.string());
+    }
+
+    std::vector<PvdDataset> datasets;
+    std::string line;
+    while (std::getline(in, line)) {
+        const std::size_t tag_pos = line.find("<DataSet");
+        if (tag_pos == std::string::npos) {
+            continue;
+        }
+
+        const std::size_t time_pos = line.find("timestep=\"", tag_pos);
+        const std::size_t file_pos = line.find("file=\"", tag_pos);
+        if (time_pos == std::string::npos || file_pos == std::string::npos) {
+            throw std::runtime_error("invalid DataSet row in " + path.string());
+        }
+
+        const std::size_t time_begin = time_pos + std::string("timestep=\"").size();
+        const std::size_t time_end = line.find('"', time_begin);
+        const std::size_t file_begin = file_pos + std::string("file=\"").size();
+        const std::size_t file_end = line.find('"', file_begin);
+        datasets.push_back(PvdDataset{
+            fce::io::parse_fortran_double(line.substr(time_begin, time_end - time_begin)),
+            line.substr(file_begin, file_end - file_begin),
+        });
+    }
+    return datasets;
+}
+
 void remove_runtime_outputs(const fs::path& case_dir) {
     for (const auto* name : {"energy.dat", "force.dat", "output.dat", "nano_final_config.dat"}) {
         fs::remove(case_dir / name);
+    }
+    for (const auto& entry : fs::directory_iterator(case_dir)) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+        const std::string name = entry.path().filename().string();
+        if ((name.rfind("mesh_config_", 0) == 0 && entry.path().extension() == ".vtu") ||
+            name == "mesh_config_series.pvd") {
+            fs::remove(entry.path());
+        }
     }
 }
 
@@ -178,11 +297,15 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
     const fs::path force_path = temp_case_dir_ / "force.dat";
     const fs::path output_path = temp_case_dir_ / "output.dat";
     const fs::path final_config_path = temp_case_dir_ / "nano_final_config.dat";
+    const fs::path pvd_path = temp_case_dir_ / "mesh_config_series.pvd";
 
     ASSERT_TRUE(fs::exists(energy_path));
     ASSERT_TRUE(fs::exists(force_path));
     ASSERT_TRUE(fs::exists(output_path));
     ASSERT_TRUE(fs::exists(final_config_path));
+    ASSERT_TRUE(fs::exists(temp_case_dir_ / "mesh_config_0000.vtu"));
+    ASSERT_TRUE(fs::exists(temp_case_dir_ / "mesh_config_0050.vtu"));
+    ASSERT_TRUE(fs::exists(pvd_path));
 
     const auto actual_energy = read_positive_load_rows(energy_path, /*skip_header=*/true);
     const auto oracle_energy = read_positive_load_rows(kCaseDir / "energy.dat", /*skip_header=*/true);
@@ -207,6 +330,16 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
     }
 
     EXPECT_EQ(count_output_load_steps(output_path), 50);
+
+    const auto actual_pvd = read_pvd_datasets(pvd_path);
+    const auto oracle_pvd = read_pvd_datasets(kCaseDir / "mesh_config_series.pvd");
+    ASSERT_EQ(actual_pvd.size(), oracle_pvd.size());
+    for (std::size_t i = 0; i < oracle_pvd.size(); ++i) {
+        EXPECT_NEAR(actual_pvd[i].timestep, oracle_pvd[i].timestep, 1e-12)
+            << "pvd dataset timestep " << i;
+        EXPECT_EQ(actual_pvd[i].file, oracle_pvd[i].file)
+            << "pvd dataset file " << i;
+    }
 
     const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
     const auto actual_config = fce::io::read_config(final_config_path.string(),
@@ -239,6 +372,61 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
             }
         }
     }
+}
+
+TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndStepZeroMatchesArchive) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kReplayTraceFixture)) << "Missing replay trace fixture at " << kReplayTraceFixture;
+
+    install_replay_trace(temp_case_dir_, kReplayTraceFixture);
+
+    const std::string command =
+        shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
+    ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
+
+    const fs::path generated_step0 = temp_case_dir_ / "mesh_config_0000.vtu";
+    const fs::path generated_step1 = temp_case_dir_ / "mesh_config_0001.vtu";
+    const fs::path generated_pvd = temp_case_dir_ / "mesh_config_series.pvd";
+
+    ASSERT_TRUE(fs::exists(generated_step0));
+    ASSERT_TRUE(fs::exists(generated_step1));
+    ASSERT_TRUE(fs::exists(generated_pvd));
+
+    const fs::path oracle_step0 = kCaseDir / "mesh_config_0000.vtu";
+    const fs::path oracle_pvd = kCaseDir / "mesh_config_series.pvd";
+
+    const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
+    const auto generated_points = read_vtu_points(generated_step0, dims.numnods);
+    const auto oracle_points = read_vtu_points(oracle_step0, dims.numnods);
+    ASSERT_EQ(generated_points.size(), oracle_points.size());
+    for (std::size_t i = 0; i < oracle_points.size(); ++i) {
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(generated_points[i][axis], oracle_points[i][axis], 1e-12)
+                << "step0 points[" << i << "][" << axis << "]";
+        }
+    }
+
+    const auto generated_eta = read_vtu_inner_displacement(generated_step0);
+    const auto oracle_eta = read_vtu_inner_displacement(oracle_step0);
+    ASSERT_EQ(generated_eta.size(), oracle_eta.size());
+    for (std::size_t i = 0; i < oracle_eta.size(); ++i) {
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(generated_eta[i][axis], oracle_eta[i][axis], 1e-12)
+                << "step0 inner_displacement[" << i << "][" << axis << "]";
+        }
+    }
+
+    EXPECT_NEAR(read_vtu_time_value(generated_step0), 0.0, 1e-12);
+    EXPECT_NEAR(read_vtu_time_value(generated_step1), 0.02, 1e-12);
+
+    const auto generated_datasets = read_pvd_datasets(generated_pvd);
+    const auto oracle_datasets = read_pvd_datasets(oracle_pvd);
+    ASSERT_GE(oracle_datasets.size(), 2U);
+    ASSERT_EQ(generated_datasets.size(), 2U);
+    EXPECT_NEAR(generated_datasets[0].timestep, oracle_datasets[0].timestep, 1e-12);
+    EXPECT_EQ(generated_datasets[0].file, oracle_datasets[0].file);
+    EXPECT_NEAR(generated_datasets[1].timestep, oracle_datasets[1].timestep, 1e-12);
+    EXPECT_EQ(generated_datasets[1].file, oracle_datasets[1].file);
 }
 
 TEST_F(E2ECompression, CrunchItReusesRecordedImperfectionTraceDeterministically) {
