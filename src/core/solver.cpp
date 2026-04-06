@@ -154,14 +154,24 @@ void apply_imperfections(const SimulatorInput& input,
         return;
     }
 
-    // Match the checked-in graphene pasapas.f90 structure:
-    //   call random_seed()
-    //   call random_number(a)
-    // before each constrained minimization step.
-    std::random_device rd;
-    std::mt19937 rng(rd());
-    std::uniform_real_distribution<double> dist(0.0, 1.0);
-    const double a = dist(rng);
+    double a = 0.0;
+    if (!input.imperfection_trace.empty()) {
+        const std::size_t step_index = static_cast<std::size_t>(iload - 1);
+        if (step_index >= input.imperfection_trace.size()) {
+            throw std::runtime_error("imperfection trace is missing a value for load step " +
+                                     std::to_string(iload));
+        }
+        a = input.imperfection_trace[step_index];
+    } else {
+        // Match the checked-in graphene pasapas.f90 structure:
+        //   call random_seed()
+        //   call random_number(a)
+        // before each constrained minimization step.
+        std::random_device rd;
+        std::mt19937 rng(rd());
+        std::uniform_real_distribution<double> dist(0.0, 1.0);
+        a = dist(rng);
+    }
     const double delta = input.general.mat.A0 * 2.0 * (a - 0.5) * input.general.fact_imp;
 
     for (int inode = 0; inode < input.mesh.numnods; ++inode) {

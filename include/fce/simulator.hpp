@@ -16,6 +16,7 @@ struct SimulatorInput {
     Mesh mesh;
     std::vector<RefConfig> ref_config;
     io::ConfigData initial_config;
+    std::vector<double> imperfection_trace;
     BCData bcs;
     GaussData gauss;
 };

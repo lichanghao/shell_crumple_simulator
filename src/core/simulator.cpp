@@ -90,6 +90,24 @@ std::vector<double> parse_ascii_numbers(const std::string& payload) {
     return values;
 }
 
+std::vector<double> read_imperfection_trace(const std::filesystem::path& path) {
+    if (!std::filesystem::exists(path)) {
+        return {};
+    }
+
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open imperfection trace file: " + path.string());
+    }
+
+    std::vector<double> values;
+    std::string token;
+    while (in >> token) {
+        values.push_back(io::parse_fortran_double(token));
+    }
+    return values;
+}
+
 void fold_ghost_forces(std::vector<double>& force, const Mesh& mesh) {
     for (int ighost = 0; ighost < mesh.nedge; ++ighost) {
         const int ghost = mesh.numnods + ighost;
@@ -121,6 +139,7 @@ SimulatorInput load_simulator_input(const std::string& case_dir) {
                                            input.dims.numnods,
                                            input.dims.numele,
                                            input.dims.ngauss);
+    input.imperfection_trace = read_imperfection_trace(base / "imperfection_trace.dat");
     input.bcs = io::read_bcs((base / "nano_BCs.dat").string());
     input.gauss = setup_gauss(input.dims.ngauss);
 
@@ -132,6 +151,11 @@ SimulatorInput load_simulator_input(const std::string& case_dir) {
     }
     if (static_cast<int>(input.initial_config.eta.size()) != input.mesh.numele) {
         throw std::runtime_error("initial eta field size does not match mesh.numele");
+    }
+    if (input.general.imperfect &&
+        !input.imperfection_trace.empty() &&
+        static_cast<int>(input.imperfection_trace.size()) < input.bcs.nloadstep) {
+        throw std::runtime_error("imperfection trace is shorter than BCs%nloadstep");
     }
 
     return input;

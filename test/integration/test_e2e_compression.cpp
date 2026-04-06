@@ -99,6 +99,14 @@ std::string shell_quote(const fs::path& path) {
     return "\"" + path.string() + "\"";
 }
 
+std::string read_file(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw std::runtime_error("cannot open file: " + path.string());
+    }
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
 void remove_runtime_outputs(const fs::path& case_dir) {
     for (const auto* name : {"energy.dat", "force.dat", "output.dat", "nano_final_config.dat"}) {
         fs::remove(case_dir / name);
@@ -217,4 +225,48 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
             }
         }
     }
+}
+
+TEST_F(E2ECompression, CrunchItReusesRecordedImperfectionTraceDeterministically) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    {
+        std::ofstream out(temp_case_dir_ / "imperfection_trace.dat", std::ios::out | std::ios::trunc);
+        ASSERT_TRUE(out.good());
+        out << std::setprecision(17);
+        for (int step = 0; step < 50; ++step) {
+            out << 0.125 << "\n";
+        }
+    }
+
+    const std::string command =
+        shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
+
+    ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
+    const std::string energy_first = read_file(temp_case_dir_ / "energy.dat");
+    const std::string force_first = read_file(temp_case_dir_ / "force.dat");
+    const std::string output_first = read_file(temp_case_dir_ / "output.dat");
+    const std::string final_first = read_file(temp_case_dir_ / "nano_final_config.dat");
+
+    remove_runtime_outputs(temp_case_dir_);
+
+    ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
+    EXPECT_EQ(read_file(temp_case_dir_ / "energy.dat"), energy_first);
+    EXPECT_EQ(read_file(temp_case_dir_ / "force.dat"), force_first);
+    EXPECT_EQ(read_file(temp_case_dir_ / "output.dat"), output_first);
+    EXPECT_EQ(read_file(temp_case_dir_ / "nano_final_config.dat"), final_first);
+}
+
+TEST_F(E2ECompression, CrunchItRejectsShortImperfectionTrace) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    {
+        std::ofstream out(temp_case_dir_ / "imperfection_trace.dat", std::ios::out | std::ios::trunc);
+        ASSERT_TRUE(out.good());
+        out << std::setprecision(17) << 0.125 << "\n";
+    }
+
+    const std::string command =
+        shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
+    EXPECT_NE(std::system(command.c_str()), 0) << "Expected short imperfection trace to be rejected";
 }
