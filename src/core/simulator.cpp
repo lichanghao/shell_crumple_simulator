@@ -17,6 +17,11 @@ namespace {
 
 constexpr int kDefaultInnerMaxIter = 100;
 
+EtaField zero_eta_field(const int numele, const int ngauss) {
+    return EtaField(static_cast<std::size_t>(numele),
+                    std::vector<Vec2>(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0}));
+}
+
 FlatCoords flatten_coords(const Coords& coords) {
     FlatCoords flat;
     flat.reserve(coords.size() * 3);
@@ -49,6 +54,30 @@ NeighborCoords12 gather_neighbor_patch(const Mesh& mesh,
     }
 
     return xneigh;
+}
+
+std::vector<double> flatten_eta(const EtaField& eta, const int numele, const int ngauss) {
+    std::vector<double> flat(static_cast<std::size_t>(2 * numele * ngauss), 0.0);
+    for (int ielem = 0; ielem < numele; ++ielem) {
+        for (int igauss = 0; igauss < ngauss; ++igauss) {
+            const std::size_t base = static_cast<std::size_t>(2 * (ielem * ngauss + igauss));
+            flat[base] = eta.at(static_cast<std::size_t>(ielem)).at(static_cast<std::size_t>(igauss))[0];
+            flat[base + 1] = eta.at(static_cast<std::size_t>(ielem)).at(static_cast<std::size_t>(igauss))[1];
+        }
+    }
+    return flat;
+}
+
+EtaField unflatten_eta(const std::vector<double>& flat, const int numele, const int ngauss) {
+    EtaField eta = zero_eta_field(numele, ngauss);
+    for (int ielem = 0; ielem < numele; ++ielem) {
+        for (int igauss = 0; igauss < ngauss; ++igauss) {
+            const std::size_t base = static_cast<std::size_t>(2 * (ielem * ngauss + igauss));
+            eta.at(static_cast<std::size_t>(ielem)).at(static_cast<std::size_t>(igauss))[0] = flat.at(base);
+            eta.at(static_cast<std::size_t>(ielem)).at(static_cast<std::size_t>(igauss))[1] = flat.at(base + 1);
+        }
+    }
+    return eta;
 }
 
 std::vector<double> parse_ascii_numbers(const std::string& payload) {
@@ -108,6 +137,13 @@ SimulatorInput load_simulator_input(const std::string& case_dir) {
     return input;
 }
 
+RuntimeState make_runtime_state(const SimulatorInput& input) {
+    return RuntimeState{
+        input.initial_config.coords,
+        input.initial_config.eta,
+    };
+}
+
 Coords read_vtu_points(const std::string& path, const int expected_points) {
     std::ifstream in(path);
     if (!in) {
@@ -146,26 +182,30 @@ Coords read_vtu_points(const std::string& path, const int expected_points) {
 }
 
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
-                                      const Coords& coords,
+                                      RuntimeState& state,
                                       const int element_begin,
                                       const int element_end) {
-    if (static_cast<int>(coords.size()) != input.mesh.numnods) {
+    if (static_cast<int>(state.coords.size()) != input.mesh.numnods) {
         throw std::runtime_error("coordinate field size does not match mesh.numnods");
+    }
+    if (static_cast<int>(state.eta.size()) != input.mesh.numele) {
+        throw std::runtime_error("eta field size does not match mesh.numele");
     }
     if (element_begin < 0 || element_end < element_begin || element_end > input.mesh.numele) {
         throw std::out_of_range("invalid assembly element range");
     }
 
-    FlatCoords coords_with_ghosts = flatten_coords(coords);
+    FlatCoords coords_with_ghosts = flatten_coords(state.coords);
     coords_with_ghosts.resize(static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)));
     ghost_nodes(input.mesh, coords_with_ghosts);
 
     AssemblyResult result;
     result.force.assign(static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)), 0.0);
+    result.eta_updates = zero_eta_field(input.mesh.numele, input.dims.ngauss);
 
     for (int ielem = element_begin; ielem < element_end; ++ielem) {
         const auto xneigh = gather_neighbor_patch(input.mesh, coords_with_ghosts, ielem);
-        const auto& eta0 = input.initial_config.eta.at(static_cast<std::size_t>(ielem));
+        const auto& eta0 = state.eta.at(static_cast<std::size_t>(ielem));
         const auto elem = compute_element_energy(
             xneigh,
             input.ref_config.at(static_cast<std::size_t>(ielem)).F0,
@@ -176,6 +216,8 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
             input.general.crit_local,
             kDefaultInnerMaxIter,
             eta0);
+        state.eta.at(static_cast<std::size_t>(ielem)) = elem.eta;
+        result.eta_updates.at(static_cast<std::size_t>(ielem)) = elem.eta;
 
         const double scale = input.ref_config.at(static_cast<std::size_t>(ielem)).J0 / 2.0;
         result.total_energy += elem.W_elem * scale;
@@ -199,9 +241,18 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
 
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       const Coords& coords,
+                                      const int element_begin,
+                                      const int element_end) {
+    RuntimeState state = make_runtime_state(input);
+    state.coords = coords;
+    return assemble_energy_forces(input, state, element_begin, element_end);
+}
+
+AssemblyResult assemble_energy_forces(const SimulatorInput& input,
+                                      RuntimeState& state,
                                       const MpiEnv& mpi) {
     const auto owned = element_partition(input.mesh.numele, mpi.size(), mpi.rank());
-    auto local = assemble_energy_forces(input, coords, owned.first, owned.second);
+    auto local = assemble_energy_forces(input, state, owned.first, owned.second);
 
     local.total_energy = mpi.allreduce_sum(local.total_energy);
     mpi.allreduce_sum(local.force);
@@ -210,7 +261,19 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     mpi.allreduce_sum(fail_count);
     local.inner_fail = static_cast<int>(std::lround(fail_count.front()));
 
+    auto eta_updates = flatten_eta(local.eta_updates, input.mesh.numele, input.dims.ngauss);
+    mpi.allreduce_sum(eta_updates);
+    state.eta = unflatten_eta(eta_updates, input.mesh.numele, input.dims.ngauss);
+
     return local;
+}
+
+AssemblyResult assemble_energy_forces(const SimulatorInput& input,
+                                      const Coords& coords,
+                                      const MpiEnv& mpi) {
+    RuntimeState state = make_runtime_state(input);
+    state.coords = coords;
+    return assemble_energy_forces(input, state, mpi);
 }
 
 }  // namespace fce

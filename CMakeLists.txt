@@ -128,6 +128,7 @@ gtest_discover_tests(integration_tests)
 # Pass oracle path to tests
 target_compile_definitions(integration_tests PRIVATE
   ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
+  CRUNCH_IT_BIN="$<TARGET_FILE:crunch_it>"
 )
 target_compile_definitions(unit_tests PRIVATE
   ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"

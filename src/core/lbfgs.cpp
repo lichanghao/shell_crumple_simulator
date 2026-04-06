@@ -95,12 +95,12 @@ int LbfgsSolver::minimize(std::vector<double>& x,
         }
 
         // iflag == 1: x was updated by MCSRCH, need new f/g evaluation.
-        // Do NOT check gnorm_ here — it was set from the initial gradient (before x
-        // was moved) and would cause premature exit.  Convergence is declared inside
-        // lbfgs_step once MCSRCH completes and CRIT_CONV is evaluated (iflag==0).
+        // Do not check gnorm_ here; it still reflects the previous evaluation
+        // and can terminate before the trial-point energy/gradient are ever
+        // computed. Convergence is declared after MCSRCH completes (iflag==0).
         icall++;
         if (icall > max_eval_) {
-            return 1;  // max evaluations reached without convergence
+            return 1;
         }
     }
 }

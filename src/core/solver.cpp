@@ -145,12 +145,53 @@ std::vector<double> real_node_forces(const AssemblyResult& res, int numnods) {
                                 res.force.begin() + 3 * numnods);
 }
 
+void write_output_header(const std::string& output_dir, const double initial_energy) {
+    const std::string output_path = output_dir + "/output.dat";
+    std::ofstream out(output_path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + output_path);
+    }
+
+    out << std::uppercase << std::scientific << std::setprecision(16);
+    out << "  Initial energy    :   " << initial_energy << "\n";
+    out << " ***************************************************\n";
+}
+
+void append_output_step(const std::string& output_dir, const int iload, const double energy) {
+    const std::string output_path = output_dir + "/output.dat";
+    std::ofstream out(output_path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error("cannot open " + output_path);
+    }
+
+    out << "\n";
+    out << "  Load Step         : " << std::setw(11) << iload << "\n";
+    out << "  =========         : " << std::setw(11) << iload << "\n";
+    out << "\n";
+    out << std::uppercase << std::scientific << std::setprecision(16);
+    out << "  Equilibrium energy:   " << energy << "\n";
+    out << " ***************************************************\n";
+}
+
+void write_final_config(const SimulatorInput& input,
+                        const RuntimeState& state,
+                        const std::string& output_dir) {
+    io::ConfigData final_config;
+    final_config.coords = state.coords;
+    final_config.eta = state.eta;
+    io::write_config(output_dir + "/nano_final_config.dat",
+                     final_config,
+                     input.mesh.numnods,
+                     input.mesh.numele,
+                     input.dims.ngauss);
+}
+
 }  // namespace
 
 // ─── minimize_free ────────────────────────────────────────────────────────────
 
 MinimizeFreeResult minimize_free(const SimulatorInput& input,
-                                  Coords& coords,
+                                  RuntimeState& state,
                                   const MpiEnv& mpi,
                                   double eps) {
     const BCData& bcs = input.bcs;
@@ -161,7 +202,7 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
     for (int i = 0; i < bcs.ndofOP; ++i) {
         const int flat_dof = bcs.mdofOP.at(static_cast<std::size_t>(i));
         x_free[static_cast<std::size_t>(i)] =
-            coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3];
+            state.coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3];
     }
 
     // XNORM0 = 1.0 (Fortran minimize_free uses 1.0 as placeholder).
@@ -177,12 +218,12 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
         // Scatter free DOFs back to coords (BC DOFs stay fixed).
         for (int i = 0; i < bcs.ndofOP; ++i) {
             const int flat_dof = bcs.mdofOP.at(static_cast<std::size_t>(i));
-            coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3] =
+            state.coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3] =
                 xv.at(static_cast<std::size_t>(i));
         }
 
         // Assemble energy and forces.
-        const auto res = assemble_energy_forces(input, coords, mpi);
+        const auto res = assemble_energy_forces(input, state, mpi);
         final_E = to_energy_components(res);
 
         // Gather gradient at free DOFs only (mirrors Fortran g_short).
@@ -198,12 +239,12 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
     // Scatter final free DOFs to coords.
     for (int i = 0; i < bcs.ndofOP; ++i) {
         const int flat_dof = bcs.mdofOP.at(static_cast<std::size_t>(i));
-        coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3] =
+        state.coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3] =
             x_free.at(static_cast<std::size_t>(i));
     }
 
     // Final energy evaluation (mirrors Fortran post-minimize_free energy call).
-    const auto final_res = assemble_energy_forces(input, coords, mpi);
+    const auto final_res = assemble_energy_forces(input, state, mpi);
     final_E = to_energy_components(final_res);
 
     MinimizeFreeResult result;
@@ -218,17 +259,17 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
 // ─── minimize_constrained ────────────────────────────────────────────────────
 
 MinimizeResult minimize_constrained(const SimulatorInput& input,
-                                     Coords& coords,
+                                     RuntimeState& state,
                                      LoadController& load_ctrl,
                                      const MpiEnv& mpi,
                                      double eps) {
     const BCData& bcs = input.bcs;
 
     // Compute XNORM0 from initial coords bbox (mirrors Fortran minimize.f90 lines 43-46).
-    const double xnorm0 = compute_xnorm0(coords);
+    const double xnorm0 = compute_xnorm0(state.coords);
 
     // Extract free DOFs.
-    std::vector<double> x_free = load_ctrl.to_free(coords);
+    std::vector<double> x_free = load_ctrl.to_free(state.coords);
 
     LbfgsSolver solver(10, eps, 1.0e-12, 20000);
 
@@ -238,10 +279,10 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
         -> std::pair<double, std::vector<double>>
     {
         // Scatter free DOFs back into coords (BC DOFs stay fixed).
-        load_ctrl.to_full(xv, coords);
+        load_ctrl.to_full(xv, state.coords);
 
         // Assemble.
-        const auto res = assemble_energy_forces(input, coords, mpi);
+        const auto res = assemble_energy_forces(input, state, mpi);
         final_E = to_energy_components(res);
 
         // Gradient at free DOFs.
@@ -255,10 +296,10 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     bcast_solver_state(mpi, flag, gnorm, x_free);
 
     // Final scatter.
-    load_ctrl.to_full(x_free, coords);
+    load_ctrl.to_full(x_free, state.coords);
 
     // Evaluate one more time to get final energy (mirrors Fortran label 50 long call).
-    const auto final_res = assemble_energy_forces(input, coords, mpi);
+    const auto final_res = assemble_energy_forces(input, state, mpi);
     final_E = to_energy_components(final_res);
 
     MinimizeResult result;
@@ -273,24 +314,29 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
 // ─── pasapas ──────────────────────────────────────────────────────────────────
 
 void pasapas(const SimulatorInput& input,
-             Coords& coords,
+             RuntimeState& state,
              const MpiEnv& mpi,
              const std::string& output_dir,
              double eps,
-             int iload_start) {
+             int iload_start,
+             int iload_stop) {
     const BCData& bcs = input.bcs;
 
     if (bcs.nCodeLoad != 3) {
         throw std::runtime_error("pasapas: only nCodeLoad=3 is supported (got " +
                                  std::to_string(bcs.nCodeLoad) + ")");
     }
+    const int final_load = iload_stop > 0 ? iload_stop : bcs.nloadstep;
+    if (final_load < iload_start || final_load > bcs.nloadstep) {
+        throw std::runtime_error("pasapas: invalid load-step range");
+    }
 
     // Build load controller and initialise BC positions.
     LoadController load_ctrl(bcs);
-    load_ctrl.init(coords);
+    load_ctrl.init(state.coords);
 
     // ── Step 0: free minimisation (mirrors Fortran pasapas.f90 lines 55-62) ───
-    auto step0 = minimize_free(input, coords, mpi, eps);
+    auto step0 = minimize_free(input, state, mpi, eps);
 
     // Mirrors Fortran: write(*,*) 'enforce the boundary change' then x0_BC=x0(mdofBC).
     if (mpi.is_root()) {
@@ -298,12 +344,14 @@ void pasapas(const SimulatorInput& input,
     }
 
     // Snap BC positions from the minimised state.
-    load_ctrl.init(coords);
+    load_ctrl.init(state.coords);
 
     // Write energy.dat: header + step 0 (mirrors Fortran Optim.f90 + pasapas.f90 line 66).
     // Also truncate force.dat so a fresh run doesn't append to a stale file.
     if (mpi.is_root() && iload_start == 1) {
         std::ofstream ff(output_dir + "/force.dat", std::ios::out | std::ios::trunc);
+        (void)ff;
+        write_output_header(output_dir, step0.E.E_total);
     }
     if (mpi.is_root()) {
         const std::string energy_path = output_dir + "/energy.dat";
@@ -330,19 +378,19 @@ void pasapas(const SimulatorInput& input,
     }
 
     // ── Load steps ────────────────────────────────────────────────────────────
-    for (int iload = iload_start; iload <= bcs.nloadstep; ++iload) {
+    for (int iload = iload_start; iload <= final_load; ++iload) {
         if (mpi.is_root()) {
             std::cout << "***\n Load Step: " << iload << "\n";
         }
 
         // Apply load increment (moves BC nodes, updates coords).
-        load_ctrl.apply_increment(iload, coords);
+        load_ctrl.apply_increment(iload, state.coords);
 
         // Constrained minimisation.
-        auto min_res = minimize_constrained(input, coords, load_ctrl, mpi, eps);
+        auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps);
 
         // Compute reaction forces.
-        const auto asm_res = assemble_energy_forces(input, coords, mpi);
+        const auto asm_res = assemble_energy_forces(input, state, mpi);
         const auto forces_real = real_node_forces(asm_res, input.mesh.numnods);
 
         double reaction1 = 0.0, reaction2 = 0.0;
@@ -379,7 +427,13 @@ void pasapas(const SimulatorInput& input,
                << std::setw(17) << reaction1
                << std::setw(17) << reaction2
                << "\n";
+
+            append_output_step(output_dir, iload, min_res.E.E_total);
         }
+    }
+
+    if (mpi.is_root()) {
+        write_final_config(input, state, output_dir);
     }
 }
 

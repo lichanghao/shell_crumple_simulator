@@ -47,7 +47,7 @@ struct MinimizeFreeResult {
 };
 
 MinimizeFreeResult minimize_free(const SimulatorInput& input,
-                                  Coords& coords,
+                                  RuntimeState& state,
                                   const MpiEnv& mpi,
                                   double eps);
 
@@ -62,7 +62,7 @@ struct MinimizeResult {
 };
 
 MinimizeResult minimize_constrained(const SimulatorInput& input,
-                                     Coords& coords,
+                                     RuntimeState& state,
                                      LoadController& load_ctrl,
                                      const MpiEnv& mpi,
                                      double eps);
@@ -72,10 +72,11 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
 // Writes energy.dat and force.dat to output_dir.
 
 void pasapas(const SimulatorInput& input,
-             Coords& coords,
+             RuntimeState& state,
              const MpiEnv& mpi,
              const std::string& output_dir,
              double eps,
-             int iload_start = 1);
+             int iload_start = 1,
+             int iload_stop = 0);
 
 }  // namespace fce

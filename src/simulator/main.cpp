@@ -4,6 +4,7 @@
 
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -28,38 +29,43 @@ int main(int argc, char** argv) {
 
         if (argc < 2) {
             if (mpi.is_root()) {
-                std::cerr << "usage: crunch_it <case_dir> [--single-step <step>]\n";
+                std::cerr << "usage: crunch_it <case_dir> [nloadstep] [--single-step <step>]\n";
             }
             return 1;
         }
 
         const std::string case_dir = argv[1];
 
-        // Check if running in legacy single-step assembly mode (--single-step N).
         bool single_step_mode = false;
         int step = 1;
+        std::optional<int> requested_load_steps;
         for (int i = 2; i < argc; ++i) {
             const std::string arg(argv[i]);
-            if (arg == "--single-step" && i + 1 < argc) {
+            if (arg == "--single-step") {
+                if (i + 1 >= argc) {
+                    throw std::invalid_argument("--single-step requires an integer step");
+                }
                 single_step_mode = true;
                 step = std::stoi(argv[i + 1]);
-                break;
+                ++i;
+                continue;
             }
-        }
-        // Legacy: if second argument is a plain integer, treat as single-step mode.
-        if (!single_step_mode && argc >= 3) {
-            try {
-                step = std::stoi(argv[2]);
-                single_step_mode = true;
-            } catch (...) {
-                single_step_mode = false;
+
+            if (requested_load_steps.has_value()) {
+                throw std::invalid_argument("unexpected extra argument: " + arg);
             }
+            requested_load_steps = std::stoi(arg);
         }
 
-        const auto input = fce::load_simulator_input(case_dir);
+        auto input = fce::load_simulator_input(case_dir);
+        if (requested_load_steps.has_value()) {
+            if (*requested_load_steps <= 0) {
+                throw std::invalid_argument("nloadstep must be positive");
+            }
+            input.bcs.nloadstep = *requested_load_steps;
+        }
 
         if (single_step_mode) {
-            // Legacy single-step assembly mode: load VTU, assemble once, print energy.
             const auto coords = fce::read_vtu_points(case_dir + "/" + step_filename(step),
                                                      input.mesh.numnods);
             const auto result = fce::assemble_energy_forces(input, coords, mpi);
@@ -70,13 +76,16 @@ int main(int argc, char** argv) {
                 std::cout << "force_dofs " << result.force.size() << "\n";
             }
         } else {
-            // Full pasapas run: load initial config and run all load steps.
-            fce::Coords coords = input.initial_config.coords;
+            auto state = fce::make_runtime_state(input);
 
-            // EPS: use crit_global from general data as convergence criterion.
             const double eps = input.general.crit_global > 0.0 ? input.general.crit_global : 1.0e-8;
-
-            fce::pasapas(input, coords, mpi, case_dir, eps);
+            fce::pasapas(input,
+                         state,
+                         mpi,
+                         case_dir,
+                         eps,
+                         1,
+                         requested_load_steps.value_or(input.bcs.nloadstep));
         }
     } catch (const std::exception& e) {
         std::cerr << "ERROR: " << e.what() << "\n";
