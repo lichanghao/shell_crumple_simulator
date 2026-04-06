@@ -29,7 +29,7 @@ int main(int argc, char** argv) {
 
         if (argc < 2) {
             if (mpi.is_root()) {
-                std::cerr << "usage: crunch_it <case_dir> [nloadstep] [--single-step <step>]\n";
+                std::cerr << "usage: crunch_it <case_dir> [stop_step] [--single-step <step>]\n";
             }
             return 1;
         }
@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
 
         bool single_step_mode = false;
         int step = 1;
-        std::optional<int> requested_load_steps;
+        std::optional<int> requested_stop_step;
         for (int i = 2; i < argc; ++i) {
             const std::string arg(argv[i]);
             if (arg == "--single-step") {
@@ -51,18 +51,20 @@ int main(int argc, char** argv) {
                 continue;
             }
 
-            if (requested_load_steps.has_value()) {
+            if (requested_stop_step.has_value()) {
                 throw std::invalid_argument("unexpected extra argument: " + arg);
             }
-            requested_load_steps = std::stoi(arg);
+            requested_stop_step = std::stoi(arg);
         }
 
-        auto input = fce::load_simulator_input(case_dir);
-        if (requested_load_steps.has_value()) {
-            if (*requested_load_steps <= 0) {
-                throw std::invalid_argument("nloadstep must be positive");
+        const auto input = fce::load_simulator_input(case_dir);
+        if (requested_stop_step.has_value()) {
+            if (*requested_stop_step <= 0) {
+                throw std::invalid_argument("stop_step must be positive");
             }
-            input.bcs.nloadstep = *requested_load_steps;
+            if (*requested_stop_step > input.bcs.nloadstep) {
+                throw std::invalid_argument("stop_step exceeds BCs%nloadstep from nano_BCs.dat");
+            }
         }
 
         if (single_step_mode) {
@@ -85,7 +87,7 @@ int main(int argc, char** argv) {
                          case_dir,
                          eps,
                          1,
-                         requested_load_steps.value_or(input.bcs.nloadstep));
+                         requested_stop_step.value_or(input.bcs.nloadstep));
         }
     } catch (const std::exception& e) {
         std::cerr << "ERROR: " << e.what() << "\n";

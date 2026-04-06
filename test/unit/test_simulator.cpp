@@ -28,6 +28,10 @@ fs::path archived_case_dir() {
     return fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
 }
 
+fs::path bilayer_nwhat_case_dir() {
+    return fs::path(ORACLE_DIR) / "graphene_bilayer_twist_vdw_1000" / "prepro_run";
+}
+
 std::vector<double> read_archived_step_energies(const fs::path& energy_path) {
     std::ifstream in(energy_path);
     if (!in) {
@@ -173,4 +177,27 @@ TEST(SimulatorAssembly, CorruptedMeshInputIsRejected) {
         std::runtime_error);
 
     fs::remove_all(temp_dir);
+}
+
+TEST(SimulatorAssembly, StatefulAssemblyUsesRuntimeEtaInsteadOfInitialConfig) {
+    auto input = fce::load_simulator_input(bilayer_nwhat_case_dir().string());
+    ASSERT_TRUE(input.general.nW_hat);
+
+    // Force the inner solver to accept the provided eta immediately so the test
+    // directly checks which eta field the stateful assembly path uses as input.
+    input.general.crit_local = 1.0e12;
+
+    auto state = fce::make_runtime_state(input);
+    const fce::Vec2 seeded_eta{
+        0.01 * input.general.mat.A0,
+        -0.015 * input.general.mat.A0,
+    };
+    state.eta.at(0).at(0) = seeded_eta;
+
+    const auto result = fce::assemble_energy_forces(input, state, 0, 1);
+
+    EXPECT_NEAR(result.eta_updates.at(0).at(0)[0], seeded_eta[0], 1e-15);
+    EXPECT_NEAR(result.eta_updates.at(0).at(0)[1], seeded_eta[1], 1e-15);
+    EXPECT_NEAR(state.eta.at(0).at(0)[0], seeded_eta[0], 1e-15);
+    EXPECT_NEAR(state.eta.at(0).at(0)[1], seeded_eta[1], 1e-15);
 }

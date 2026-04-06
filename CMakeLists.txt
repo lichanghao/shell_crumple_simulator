@@ -98,6 +98,7 @@ add_executable(unit_tests
   test/unit/test_ghost_nodes.cpp
   test/unit/test_io.cpp
   test/unit/test_lbfgs.cpp
+  test/unit/test_load_controller.cpp
   test/unit/test_mpi_env.cpp
   test/unit/test_principal.cpp
   test/unit/test_reference_config.cpp

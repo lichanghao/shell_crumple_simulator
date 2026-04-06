@@ -11,9 +11,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -143,6 +145,30 @@ void bcast_solver_state(const MpiEnv& mpi,
 std::vector<double> real_node_forces(const AssemblyResult& res, int numnods) {
     return std::vector<double>(res.force.begin(),
                                 res.force.begin() + 3 * numnods);
+}
+
+void apply_imperfections(const SimulatorInput& input,
+                         RuntimeState& state,
+                         const int iload) {
+    if (!input.general.imperfect) {
+        return;
+    }
+
+    // The checked-in graphene pasapas.f90 perturbs all real nodes by the same
+    // scalar `a` drawn each step after `load_doit` and before constrained
+    // minimization. We keep a deterministic step-to-step sequence here so the
+    // archived-oracle regression remains reproducible.
+    static std::minstd_rand rng(1);
+    static std::uniform_real_distribution<double> dist(0.0, 1.0);
+    const double a = dist(rng);
+    const double delta = input.general.mat.A0 * 2.0 * (a - 0.5) * input.general.fact_imp;
+
+    for (int inode = 0; inode < input.mesh.numnods; ++inode) {
+        (void)iload;
+        state.coords[static_cast<std::size_t>(inode)][0] += delta;
+        state.coords[static_cast<std::size_t>(inode)][1] += delta;
+        state.coords[static_cast<std::size_t>(inode)][2] += delta;
+    }
 }
 
 void write_output_header(const std::string& output_dir, const double initial_energy) {
@@ -385,6 +411,7 @@ void pasapas(const SimulatorInput& input,
 
         // Apply load increment (moves BC nodes, updates coords).
         load_ctrl.apply_increment(iload, state.coords);
+        apply_imperfections(input, state, iload);
 
         // Constrained minimisation.
         auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps);

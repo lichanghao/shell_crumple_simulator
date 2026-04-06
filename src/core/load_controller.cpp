@@ -141,7 +141,7 @@ void LoadController::compute_reaction(const std::vector<double>& forces_flat,
         const std::size_t mdof_idx = static_cast<std::size_t>(3 * i + 2);
         const int flat_dof = bcs_.mdofBC.at(mdof_idx);
         const double force_val = forces_flat.at(static_cast<std::size_t>(flat_dof));
-        if (bcs_.mnodBC.at(static_cast<std::size_t>(i))[1] == 1) {
+        if (bcs_.mnodBC.at(static_cast<std::size_t>(i))[1] == 0) {
             reaction1 += force_val;
         } else {
             reaction2 += force_val;
