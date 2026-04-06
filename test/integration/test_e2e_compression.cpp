@@ -40,6 +40,8 @@ struct PvdDataset {
     std::string file;
 };
 
+double relative_error(double actual, double expected, double floor);
+
 std::vector<DataRow> read_numeric_rows(const fs::path& path, const bool skip_header) {
     std::ifstream in(path);
     if (!in) {
@@ -226,6 +228,15 @@ std::vector<double> read_vtu_scalar_array(const fs::path& path, const std::strin
         extract_xml_data_array_payload(read_file(path), "Name=\"" + name + "\""));
 }
 
+std::vector<double> read_vtu_scalar_array_or_empty(const fs::path& path, const std::string& name) {
+    const std::string xml = read_file(path);
+    const std::string marker = "Name=\"" + name + "\"";
+    if (xml.find(marker) == std::string::npos) {
+        return {};
+    }
+    return parse_numeric_payload(extract_xml_data_array_payload(xml, marker));
+}
+
 std::vector<int> read_vtu_integer_array(const fs::path& path, const std::string& name) {
     return parse_integer_payload(
         extract_xml_data_array_payload(read_file(path), "Name=\"" + name + "\""));
@@ -240,6 +251,80 @@ fce::Vec3 averaged_eta(const fce::EtaField& eta, const int elem, const int ngaus
     out[0] /= static_cast<double>(ngauss);
     out[1] /= static_cast<double>(ngauss);
     return out;
+}
+
+std::vector<double> flatten_vec3_array(const std::vector<fce::Vec3>& values) {
+    std::vector<double> flat;
+    flat.reserve(values.size() * 3);
+    for (const auto& value : values) {
+        flat.push_back(value[0]);
+        flat.push_back(value[1]);
+        flat.push_back(value[2]);
+    }
+    return flat;
+}
+
+double max_relative_error(const std::vector<double>& actual,
+                          const std::vector<double>& expected,
+                          const double floor) {
+    if (actual.size() != expected.size()) {
+        throw std::runtime_error("cannot compare vectors with different lengths");
+    }
+    double max_err = 0.0;
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        max_err = std::max(max_err, relative_error(actual[i], expected[i], floor));
+    }
+    return max_err;
+}
+
+void expect_vtu_matches_archive(const fs::path& generated,
+                                const fs::path& oracle,
+                                const fce::io::DimsData& dims,
+                                const double tol) {
+    EXPECT_LE(relative_error(read_vtu_time_value(generated), read_vtu_time_value(oracle), 1e-12), tol)
+        << "time " << generated.filename();
+
+    EXPECT_LE(max_relative_error(flatten_vec3_array(read_vtu_points(generated, dims.numnods)),
+                                 flatten_vec3_array(read_vtu_points(oracle, dims.numnods)),
+                                 1e-12),
+              tol)
+        << "points " << generated.filename();
+
+    EXPECT_EQ(read_vtu_integer_array(generated, "connectivity"),
+              read_vtu_integer_array(oracle, "connectivity"))
+        << "connectivity " << generated.filename();
+    EXPECT_EQ(read_vtu_integer_array(generated, "offsets"),
+              read_vtu_integer_array(oracle, "offsets"))
+        << "offsets " << generated.filename();
+    EXPECT_EQ(read_vtu_integer_array(generated, "types"),
+              read_vtu_integer_array(oracle, "types"))
+        << "types " << generated.filename();
+
+    EXPECT_LE(max_relative_error(flatten_vec3_array(read_vtu_inner_displacement(generated)),
+                                 flatten_vec3_array(read_vtu_inner_displacement(oracle)),
+                                 1e-12),
+              tol)
+        << "inner_displacement " << generated.filename();
+
+    std::vector<double> expected_atomic_density = read_vtu_scalar_array_or_empty(oracle, "atomic_density");
+    if (expected_atomic_density.empty()) {
+        expected_atomic_density.assign(static_cast<std::size_t>(dims.numnods), 0.0);
+    }
+    EXPECT_LE(max_relative_error(read_vtu_scalar_array(generated, "atomic_density"),
+                                 expected_atomic_density,
+                                 1e-12),
+              tol)
+        << "atomic_density " << generated.filename();
+
+    std::vector<double> expected_w_density = read_vtu_scalar_array_or_empty(oracle, "W_density");
+    if (expected_w_density.empty()) {
+        expected_w_density.assign(static_cast<std::size_t>(dims.numele), 0.0);
+    }
+    EXPECT_LE(max_relative_error(read_vtu_scalar_array(generated, "W_density"),
+                                 expected_w_density,
+                                 1e-12),
+              tol)
+        << "W_density " << generated.filename();
 }
 
 std::vector<PvdDataset> read_pvd_datasets(const fs::path& path) {
@@ -398,6 +483,19 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
     }
 
     const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
+    expect_vtu_matches_archive(temp_case_dir_ / "mesh_config_0001.vtu",
+                               kCaseDir / "mesh_config_0001.vtu",
+                               dims,
+                               1e-6);
+    expect_vtu_matches_archive(temp_case_dir_ / "mesh_config_0025.vtu",
+                               kCaseDir / "mesh_config_0025.vtu",
+                               dims,
+                               1e-6);
+    expect_vtu_matches_archive(temp_case_dir_ / "mesh_config_0050.vtu",
+                               kCaseDir / "mesh_config_0050.vtu",
+                               dims,
+                               1e-6);
+
     const auto actual_config = fce::io::read_config(final_config_path.string(),
                                                     dims.numnods,
                                                     dims.numele,

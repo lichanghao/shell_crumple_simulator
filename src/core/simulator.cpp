@@ -139,6 +139,12 @@ SimulatorInput load_simulator_input(const std::string& case_dir) {
                                            input.dims.numnods,
                                            input.dims.numele,
                                            input.dims.ngauss);
+    if (std::filesystem::exists(base / "nano_vdw.dat")) {
+        input.vdw = io::read_vdw((base / "nano_vdw.dat").string(),
+                                 input.dims.ng_tot,
+                                 input.dims.ngauss_vdw,
+                                 input.dims.nneigh);
+    }
     input.imperfection_trace = read_imperfection_trace(base / "imperfection_trace.dat");
     input.bcs = io::read_bcs((base / "nano_BCs.dat").string());
     input.gauss = setup_gauss(input.dims.ngauss);

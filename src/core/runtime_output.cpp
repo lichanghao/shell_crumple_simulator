@@ -67,17 +67,71 @@ void validate_runtime_output_state(const SimulatorInput& input,
 }
 
 std::vector<double> compute_atomic_density(const SimulatorInput& input) {
-    if (input.dims.nvdw != 0) {
-        throw std::runtime_error("runtime output atomic_density for nvdw>0 is not implemented");
+    std::vector<double> rho_nodal(static_cast<std::size_t>(input.mesh.numnods), 0.0);
+    std::vector<double> weight_nodal(static_cast<std::size_t>(input.mesh.numnods), 0.0);
+    if (input.vdw.nvdw != 1 || input.vdw.rho.empty() || input.vdw.shapef.empty()) {
+        return rho_nodal;
     }
-    return std::vector<double>(static_cast<std::size_t>(input.mesh.numnods), 0.0);
+
+    if (input.vdw.ngauss_vdw <= 0) {
+        throw std::runtime_error("runtime output vdW gauss count must be positive");
+    }
+    if (static_cast<int>(input.vdw.shapef.size()) < input.vdw.ngauss_vdw) {
+        throw std::runtime_error("runtime output vdW shapef size does not match ngauss_vdw");
+    }
+    const int expected_rho_size = input.mesh.numele * input.vdw.ngauss_vdw;
+    if (static_cast<int>(input.vdw.rho.size()) < expected_rho_size) {
+        throw std::runtime_error("runtime output vdW rho payload is shorter than expected");
+    }
+
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        const auto& connect = input.mesh.connect.at(static_cast<std::size_t>(ielem));
+        for (int ig = 0; ig < input.vdw.ngauss_vdw; ++ig) {
+            const double rho_gp =
+                input.vdw.rho.at(static_cast<std::size_t>(ielem * input.vdw.ngauss_vdw + ig));
+            const auto& shape = input.vdw.shapef.at(static_cast<std::size_t>(ig));
+            for (int inode = 0; inode < 12; ++inode) {
+                const int node_index = connect.neigh_vert[inode];
+                if (node_index < 0 || node_index >= input.mesh.numnods) {
+                    continue;
+                }
+                rho_nodal.at(static_cast<std::size_t>(node_index)) += rho_gp * shape[inode];
+                weight_nodal.at(static_cast<std::size_t>(node_index)) += shape[inode];
+            }
+        }
+    }
+
+    for (int inode = 0; inode < input.mesh.numnods; ++inode) {
+        if (weight_nodal[static_cast<std::size_t>(inode)] > 1.0e-14) {
+            rho_nodal[static_cast<std::size_t>(inode)] /=
+                weight_nodal[static_cast<std::size_t>(inode)];
+        }
+    }
+    return rho_nodal;
 }
 
 std::vector<double> compute_w_density(const SimulatorInput& input) {
-    if (input.dims.nvdw != 0) {
-        throw std::runtime_error("runtime output W_density for nvdw>0 is not implemented");
+    std::vector<double> w_density(static_cast<std::size_t>(input.mesh.numele), 0.0);
+    if (input.vdw.nvdw != 1 || input.vdw.rho.empty()) {
+        return w_density;
     }
-    return std::vector<double>(static_cast<std::size_t>(input.mesh.numele), 0.0);
+
+    if (input.vdw.ngauss_vdw <= 0) {
+        throw std::runtime_error("runtime output vdW gauss count must be positive");
+    }
+    const int expected_rho_size = input.mesh.numele * input.vdw.ngauss_vdw;
+    if (static_cast<int>(input.vdw.rho.size()) < expected_rho_size) {
+        throw std::runtime_error("runtime output vdW rho payload is shorter than expected");
+    }
+
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        double avg = 0.0;
+        for (int ig = 0; ig < input.vdw.ngauss_vdw; ++ig) {
+            avg += input.vdw.rho.at(static_cast<std::size_t>(ielem * input.vdw.ngauss_vdw + ig));
+        }
+        w_density[static_cast<std::size_t>(ielem)] = avg / static_cast<double>(input.vdw.ngauss_vdw);
+    }
+    return w_density;
 }
 
 }  // namespace

@@ -97,6 +97,24 @@ TEST(RuntimeOutput, WritesCanonicalZeroDensityFields) {
     fs::remove_all(temp_dir);
 }
 
+TEST(RuntimeOutput, FallsBackToZeroDensityWhenNvdwIsEnabledButRhoIsMissing) {
+    auto input = make_minimal_input();
+    input.dims.nvdw = 1;
+    input.vdw.nvdw = 0;
+
+    const auto state = make_minimal_state();
+    const fs::path temp_dir = make_temp_dir();
+
+    ASSERT_NO_THROW(fce::write_mesh_snapshot(input, state, temp_dir.string(), 1));
+
+    const std::string xml = read_file(temp_dir / "mesh_config_0001.vtu");
+    EXPECT_NE(xml.find("Name=\"atomic_density\""), std::string::npos);
+    EXPECT_NE(xml.find("Name=\"W_density\""), std::string::npos);
+    EXPECT_NE(xml.find(" 0.0000000000000000E+00"), std::string::npos);
+
+    fs::remove_all(temp_dir);
+}
+
 TEST(RuntimeOutput, RejectsInvalidRuntimeState) {
     const auto input = make_minimal_input();
     auto state = make_minimal_state();
