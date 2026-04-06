@@ -26,6 +26,8 @@ namespace fs = std::filesystem;
 
 const fs::path kCaseDir =
     fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+const fs::path kReplayTraceFixture =
+    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_cpp.dat";
 const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
 
 struct DataRow {
@@ -113,6 +115,15 @@ void remove_runtime_outputs(const fs::path& case_dir) {
     }
 }
 
+void install_replay_trace(const fs::path& case_dir, const fs::path& fixture_path) {
+    if (!fs::exists(fixture_path)) {
+        throw std::runtime_error("missing replay trace fixture: " + fixture_path.string());
+    }
+    fs::copy_file(fixture_path,
+                  case_dir / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+}
+
 int count_output_load_steps(const fs::path& output_path) {
     std::ifstream in(output_path);
     if (!in) {
@@ -155,6 +166,9 @@ protected:
 
 TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtifacts) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kReplayTraceFixture)) << "Missing replay trace fixture at " << kReplayTraceFixture;
+
+    install_replay_trace(temp_case_dir_, kReplayTraceFixture);
 
     const std::string command =
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 50";

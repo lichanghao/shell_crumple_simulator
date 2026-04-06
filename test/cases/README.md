@@ -21,9 +21,10 @@ Preprocessor reference outputs for the standard graphene compression case.
 ### graphene_compression_simulator/np1/
 Simulator reference outputs for the standard graphene compression case — serial run (np=1).
 - Input: nano_*.dat files from graphene_compression_prepro/; run command: `mpirun -np 1 crunch_it`
-- Deterministic runtime harness: `imperfection_trace.dat` is a C++ test-side injected
-  per-step imperfection scalar sequence used to make archived-oracle replay reproducible;
-  it is not part of the frozen Fortran output set.
+- Deterministic replay fixture: `graphene_compression_simulator/imperfection_trace_cpp.dat`
+  is a C++ test-side injected per-step imperfection scalar sequence used by the integration
+  harness when it copies this archived case to a temp directory; it is not part of the
+  frozen Fortran output set.
 - Confirmed single-rank: `simulator.log` line 1: "Numero de procesadores: 1"
 - Oracle outputs: `energy.dat`, `force.dat`, `nano_final_config.dat`, `output.dat`,
   `simulator.log`, `mesh_config_0000.vtu` … `mesh_config_0050.vtu` (51 VTU snapshots),
