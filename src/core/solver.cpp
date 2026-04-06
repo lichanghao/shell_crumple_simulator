@@ -154,12 +154,13 @@ void apply_imperfections(const SimulatorInput& input,
         return;
     }
 
-    // The checked-in graphene pasapas.f90 perturbs all real nodes by the same
-    // scalar `a` drawn each step after `load_doit` and before constrained
-    // minimization. We keep a deterministic step-to-step sequence here so the
-    // archived-oracle regression remains reproducible.
-    static std::minstd_rand rng(1);
-    static std::uniform_real_distribution<double> dist(0.0, 1.0);
+    // Match the checked-in graphene pasapas.f90 structure:
+    //   call random_seed()
+    //   call random_number(a)
+    // before each constrained minimization step.
+    std::random_device rd;
+    std::mt19937 rng(rd());
+    std::uniform_real_distribution<double> dist(0.0, 1.0);
     const double a = dist(rng);
     const double delta = input.general.mat.A0 * 2.0 * (a - 0.5) * input.general.fact_imp;
 
