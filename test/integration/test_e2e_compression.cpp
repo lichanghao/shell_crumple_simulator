@@ -124,6 +124,30 @@ std::vector<double> parse_numeric_payload(const std::string& payload) {
     return values;
 }
 
+std::vector<int> parse_integer_payload(const std::string& payload) {
+    std::istringstream in(payload);
+    std::vector<int> values;
+    std::string token;
+    while (in >> token) {
+        values.push_back(std::stoi(token));
+    }
+    return values;
+}
+
+std::string extract_xml_section(const std::string& xml,
+                                const std::string& start_marker,
+                                const std::string& end_marker) {
+    const std::size_t start = xml.find(start_marker);
+    if (start == std::string::npos) {
+        throw std::runtime_error("cannot find XML section: " + start_marker);
+    }
+    const std::size_t end = xml.find(end_marker, start);
+    if (end == std::string::npos) {
+        throw std::runtime_error("cannot find XML section terminator: " + end_marker);
+    }
+    return xml.substr(start, end - start + end_marker.size());
+}
+
 std::string extract_xml_data_array_payload(const std::string& xml, const std::string& marker) {
     const std::size_t marker_pos = xml.find(marker);
     if (marker_pos == std::string::npos) {
@@ -135,6 +159,17 @@ std::string extract_xml_data_array_payload(const std::string& xml, const std::st
         throw std::runtime_error("invalid DataArray payload for marker: " + marker);
     }
     return xml.substr(data_begin + 1, data_end - data_begin - 1);
+}
+
+std::string extract_first_xml_data_array_payload(const std::string& xml_section) {
+    const std::size_t data_array_pos = xml_section.find("<DataArray");
+    const std::size_t data_begin = xml_section.find('>', data_array_pos);
+    const std::size_t data_end = xml_section.find("</DataArray>", data_begin);
+    if (data_array_pos == std::string::npos || data_begin == std::string::npos ||
+        data_end == std::string::npos) {
+        throw std::runtime_error("invalid XML DataArray payload");
+    }
+    return xml_section.substr(data_begin + 1, data_end - data_begin - 1);
 }
 
 double read_vtu_time_value(const fs::path& path) {
@@ -170,8 +205,8 @@ std::vector<fce::Vec3> read_vtu_inner_displacement(const fs::path& path) {
 std::vector<fce::Vec3> read_vtu_points(const fs::path& path, const int expected_points) {
     const std::string xml = read_file(path);
     const auto values = parse_numeric_payload(
-        extract_xml_data_array_payload(xml, "NumberOfComponents=\"3\" format=\"ascii\""));
-    if (static_cast<int>(values.size()) < expected_points * 3) {
+        extract_first_xml_data_array_payload(extract_xml_section(xml, "<Points>", "</Points>")));
+    if (static_cast<int>(values.size()) != expected_points * 3) {
         throw std::runtime_error("VTU points payload is shorter than expected in " + path.string());
     }
 
@@ -183,6 +218,27 @@ std::vector<fce::Vec3> read_vtu_points(const fs::path& path, const int expected_
             values[3 * i + 2],
         };
     }
+    return out;
+}
+
+std::vector<double> read_vtu_scalar_array(const fs::path& path, const std::string& name) {
+    return parse_numeric_payload(
+        extract_xml_data_array_payload(read_file(path), "Name=\"" + name + "\""));
+}
+
+std::vector<int> read_vtu_integer_array(const fs::path& path, const std::string& name) {
+    return parse_integer_payload(
+        extract_xml_data_array_payload(read_file(path), "Name=\"" + name + "\""));
+}
+
+fce::Vec3 averaged_eta(const fce::EtaField& eta, const int elem, const int ngauss) {
+    fce::Vec3 out{0.0, 0.0, 0.0};
+    for (int igauss = 0; igauss < ngauss; ++igauss) {
+        out[0] += eta.at(static_cast<std::size_t>(elem)).at(static_cast<std::size_t>(igauss))[0];
+        out[1] += eta.at(static_cast<std::size_t>(elem)).at(static_cast<std::size_t>(igauss))[1];
+    }
+    out[0] /= static_cast<double>(ngauss);
+    out[1] /= static_cast<double>(ngauss);
     return out;
 }
 
@@ -374,7 +430,7 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
     }
 }
 
-TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndStepZeroMatchesArchive) {
+TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kReplayTraceFixture)) << "Missing replay trace fixture at " << kReplayTraceFixture;
 
@@ -387,10 +443,12 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndStepZeroMatchesArchive) 
     const fs::path generated_step0 = temp_case_dir_ / "mesh_config_0000.vtu";
     const fs::path generated_step1 = temp_case_dir_ / "mesh_config_0001.vtu";
     const fs::path generated_pvd = temp_case_dir_ / "mesh_config_series.pvd";
+    const fs::path generated_final_config = temp_case_dir_ / "nano_final_config.dat";
 
     ASSERT_TRUE(fs::exists(generated_step0));
     ASSERT_TRUE(fs::exists(generated_step1));
     ASSERT_TRUE(fs::exists(generated_pvd));
+    ASSERT_TRUE(fs::exists(generated_final_config));
 
     const fs::path oracle_step0 = kCaseDir / "mesh_config_0000.vtu";
     const fs::path oracle_pvd = kCaseDir / "mesh_config_series.pvd";
@@ -416,8 +474,64 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndStepZeroMatchesArchive) 
         }
     }
 
+    EXPECT_EQ(read_vtu_integer_array(generated_step0, "connectivity"),
+              read_vtu_integer_array(oracle_step0, "connectivity"));
+    EXPECT_EQ(read_vtu_integer_array(generated_step0, "offsets"),
+              read_vtu_integer_array(oracle_step0, "offsets"));
+    EXPECT_EQ(read_vtu_integer_array(generated_step0, "types"),
+              read_vtu_integer_array(oracle_step0, "types"));
+
+    const auto generated_atomic_density0 = read_vtu_scalar_array(generated_step0, "atomic_density");
+    const auto generated_atomic_density1 = read_vtu_scalar_array(generated_step1, "atomic_density");
+    ASSERT_EQ(generated_atomic_density0.size(), static_cast<std::size_t>(dims.numnods));
+    ASSERT_EQ(generated_atomic_density1.size(), static_cast<std::size_t>(dims.numnods));
+    for (int node = 0; node < dims.numnods; ++node) {
+        EXPECT_NEAR(generated_atomic_density0[static_cast<std::size_t>(node)], 0.0, 1e-12)
+            << "step0 atomic_density[" << node << "]";
+        EXPECT_NEAR(generated_atomic_density1[static_cast<std::size_t>(node)], 0.0, 1e-12)
+            << "step1 atomic_density[" << node << "]";
+    }
+
+    const auto generated_w_density0 = read_vtu_scalar_array(generated_step0, "W_density");
+    const auto generated_w_density1 = read_vtu_scalar_array(generated_step1, "W_density");
+    ASSERT_EQ(generated_w_density0.size(), static_cast<std::size_t>(dims.numele));
+    ASSERT_EQ(generated_w_density1.size(), static_cast<std::size_t>(dims.numele));
+    for (int elem = 0; elem < dims.numele; ++elem) {
+        EXPECT_NEAR(generated_w_density0[static_cast<std::size_t>(elem)], 0.0, 1e-12)
+            << "step0 W_density[" << elem << "]";
+        EXPECT_NEAR(generated_w_density1[static_cast<std::size_t>(elem)], 0.0, 1e-12)
+            << "step1 W_density[" << elem << "]";
+    }
+
     EXPECT_NEAR(read_vtu_time_value(generated_step0), 0.0, 1e-12);
     EXPECT_NEAR(read_vtu_time_value(generated_step1), 0.02, 1e-12);
+
+    const auto final_config = fce::io::read_config(generated_final_config.string(),
+                                                   dims.numnods,
+                                                   dims.numele,
+                                                   dims.ngauss);
+    const auto generated_step1_points = read_vtu_points(generated_step1, dims.numnods);
+    ASSERT_EQ(generated_step1_points.size(), final_config.coords.size());
+    for (int node = 0; node < dims.numnods; ++node) {
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(generated_step1_points[static_cast<std::size_t>(node)][axis],
+                        final_config.coords[static_cast<std::size_t>(node)][axis],
+                        1e-12)
+                << "step1 points[" << node << "][" << axis << "]";
+        }
+    }
+
+    const auto generated_step1_eta = read_vtu_inner_displacement(generated_step1);
+    ASSERT_EQ(generated_step1_eta.size(), static_cast<std::size_t>(dims.numele));
+    for (int elem = 0; elem < dims.numele; ++elem) {
+        const auto expected = averaged_eta(final_config.eta, elem, dims.ngauss);
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(generated_step1_eta[static_cast<std::size_t>(elem)][axis],
+                        expected[axis],
+                        1e-12)
+                << "step1 inner_displacement[" << elem << "][" << axis << "]";
+        }
+    }
 
     const auto generated_datasets = read_pvd_datasets(generated_pvd);
     const auto oracle_datasets = read_pvd_datasets(oracle_pvd);

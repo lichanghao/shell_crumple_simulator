@@ -1,3 +1,50 @@
+# Prompt and history files
+draft.md
+CLAUDE.md
+AGENT.md
+GEMINI.md
+
+# macOS Finder metadata
 .DS_Store
-.humanize*
-build/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Fortran compilation artifacts
+*.o
+*.mod
+*.smod
+
+# Built executables
+crunch_it
+crunch_it_dbg
+PrePro
+
+# Data and simulation outputs (ignored by extension)
+*.dat
+*.log
+*.vtu
+*.nc
+*.msh
+*.geo*
+*.case
+*.pvd
+Eofnode*
+
+# EXCEPTIONS: Keep necessary input and documentation files
+!**/input/*.dat
+!**/prepro_input/*.dat
+!nanotubeTwistOriginPrepro/data.dat
+!grapheneCompressionOriginPrePro/data.dat
+!**/README.dat
+
+# Test-case build and run directories
+test/*
+document/*
+build/*
+
+# Editor backup/swap artifacts
+*~
+\#*\#
+*.bak
