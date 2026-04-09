@@ -11,6 +11,7 @@
 #include "fce/types.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
@@ -24,6 +25,21 @@
 namespace fce {
 
 namespace {
+
+bool lbfgs_monitor_enabled() {
+    const char* raw = std::getenv("FCE_LBFGS_MONITOR");
+    if (raw == nullptr) {
+        return false;
+    }
+
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+
+    return !(value.empty() || value == "0" || value == "false" ||
+             value == "no" || value == "off");
+}
 
 // ─── XNORM0 computation ───────────────────────────────────────────────────────
 // Mirrors Fortran minimize.f90 lines 43-46:
@@ -246,7 +262,8 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
     // XNORM0 = 1.0 (Fortran minimize_free uses 1.0 as placeholder).
     const double xnorm0 = 1.0;
 
-    LbfgsSolver solver(10, eps, 1.0e-12, 10000, mpi.is_root());
+    LbfgsSolver solver(10, eps, 1.0e-12, 10000,
+                       mpi.is_root() && lbfgs_monitor_enabled());
 
     EnergyComponents final_E{};
     AssemblyResult final_asm{};
@@ -283,10 +300,11 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
             x_free.at(static_cast<std::size_t>(i));
     }
 
-    if (flag > 0) {
-        final_asm = assemble_energy_forces(input, state, mpi);
-        final_E = to_energy_components(final_asm);
-    }
+    // LBFGS returns the final accepted X, but the last callback can still hold
+    // the previous trial-state assembly. Reassemble after the final scatter so
+    // energy.dat / force.dat reflect the converged coordinates.
+    final_asm = assemble_energy_forces(input, state, mpi);
+    final_E = to_energy_components(final_asm);
 
     MinimizeFreeResult result;
     result.E     = final_E;
@@ -313,7 +331,8 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     // Extract free DOFs.
     std::vector<double> x_free = load_ctrl.to_free(state.coords);
 
-    LbfgsSolver solver(10, eps, 1.0e-12, 20000, mpi.is_root());
+    LbfgsSolver solver(10, eps, 1.0e-12, 20000,
+                       mpi.is_root() && lbfgs_monitor_enabled());
 
     EnergyComponents final_E{};
     AssemblyResult final_asm{};
@@ -343,10 +362,10 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     // Final scatter mirrors Fortran long(...).
     load_ctrl.scatter_all(x_free, state.coords);
 
-    if (flag > 0) {
-        final_asm = assemble_energy_forces(input, state, mpi);
-        final_E = to_energy_components(final_asm);
-    }
+    // Mirror the free minimizer: recompute at the scattered final state so the
+    // reported energy, forces, and eta correspond to the converged coordinates.
+    final_asm = assemble_energy_forces(input, state, mpi);
+    final_E = to_energy_components(final_asm);
 
     MinimizeResult result;
     result.E     = final_E;

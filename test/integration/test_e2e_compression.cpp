@@ -499,6 +499,21 @@ void install_replay_trace(const fs::path& case_dir, const fs::path& fixture_path
                   fs::copy_options::overwrite_existing);
 }
 
+int run_crunch_it(const fs::path& case_dir,
+                  const int stop_step,
+                  const fs::path& stdout_path = {},
+                  const std::string& env_prefix = {}) {
+    std::string command;
+    if (!env_prefix.empty()) {
+        command += env_prefix + " ";
+    }
+    command += shell_quote(kCrunchItBin) + " " + shell_quote(case_dir) + " " + std::to_string(stop_step);
+    if (!stdout_path.empty()) {
+        command += " > " + shell_quote(stdout_path) + " 2>&1";
+    }
+    return std::system(command.c_str());
+}
+
 int count_output_load_steps(const fs::path& output_path) {
     std::ifstream in(output_path);
     if (!in) {
@@ -794,19 +809,17 @@ TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTra
     ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
 
     install_replay_trace(temp_case_dir_, kFortranTraceFixture);
-
-    const std::string command =
-        shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
-    ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
 
     const auto actual_energy = read_positive_load_rows(temp_case_dir_ / "energy.dat", /*skip_header=*/true);
     const auto oracle_energy = read_positive_load_rows(kCaseDir / "energy.dat", /*skip_header=*/true);
     ASSERT_FALSE(actual_energy.empty());
     ASSERT_FALSE(oracle_energy.empty());
     ASSERT_GE(actual_energy.front().values.size(), 2U);
-    ASSERT_GE(oracle_energy.front().values.size(), 2U);
+    ASSERT_GE(oracle_energy.front().values.size(), 6U);
     EXPECT_NEAR(actual_energy.front().values[0], oracle_energy.front().values[0], 1e-12);
     EXPECT_LE(relative_error(actual_energy.front().values[1], oracle_energy.front().values[1], 1e-12), 1e-4);
+    EXPECT_LE(relative_error(actual_energy.front().values[5], oracle_energy.front().values[5], 1e-12), 1e-4);
 
     const auto actual_force = read_positive_load_rows(temp_case_dir_ / "force.dat", /*skip_header=*/false);
     const auto oracle_force = read_positive_load_rows(kCaseDir / "force.dat", /*skip_header=*/false);
@@ -817,6 +830,24 @@ TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTra
         EXPECT_LE(relative_error(actual_force.front().values[col], oracle_force.front().values[col], 1e-12), 1e-3)
             << "step1 force col " << col;
     }
+}
+
+TEST_F(E2ECompression, CrunchItLbfgsMonitorIsOptIn) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
+
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
+
+    const fs::path quiet_stdout = temp_case_dir_ / "quiet.stdout";
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, quiet_stdout), 0);
+    EXPECT_EQ(read_file(quiet_stdout).find("NUMBER OF CORRECTIONS"), std::string::npos);
+
+    remove_runtime_outputs(temp_case_dir_);
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
+
+    const fs::path monitor_stdout = temp_case_dir_ / "monitor.stdout";
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, monitor_stdout, "FCE_LBFGS_MONITOR=1"), 0);
+    EXPECT_NE(read_file(monitor_stdout).find("NUMBER OF CORRECTIONS"), std::string::npos);
 }
 
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
