@@ -246,7 +246,7 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
     // XNORM0 = 1.0 (Fortran minimize_free uses 1.0 as placeholder).
     const double xnorm0 = 1.0;
 
-    LbfgsSolver solver(10, eps, 1.0e-12, 10000);
+    LbfgsSolver solver(10, eps, 1.0e-12, 10000, mpi.is_root());
 
     EnergyComponents final_E{};
     AssemblyResult final_asm{};
@@ -313,7 +313,7 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     // Extract free DOFs.
     std::vector<double> x_free = load_ctrl.to_free(state.coords);
 
-    LbfgsSolver solver(10, eps, 1.0e-12, 20000);
+    LbfgsSolver solver(10, eps, 1.0e-12, 20000, mpi.is_root());
 
     EnergyComponents final_E{};
     AssemblyResult final_asm{};

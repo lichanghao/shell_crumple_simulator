@@ -30,8 +30,10 @@ public:
     // eps     : convergence tolerance (default 1e-8)
     // xtol    : machine precision for line search (default 1e-12)
     // max_eval: max gradient evaluations before forced exit (default 20000)
+    // monitor : when true, print Fortran-style iteration diagnostics on stdout
     explicit LbfgsSolver(int m = 10, double eps = 1.0e-8, double xtol = 1.0e-12,
-                         int max_eval = 20000);
+                         int max_eval = 20000,
+                         bool monitor = false);
 
     // Minimize f(x) starting from x (modified in-place to the minimizer).
     // xnorm0   : precomputed bbox diagonal of initial configuration (see minimize.f90)
@@ -49,7 +51,8 @@ public:
     // Reset history so the next minimize() call starts fresh (called between load steps).
     void reset();
 
-    double gnorm() const { return gnorm_; }
+    double gnorm() const { return crit_conv_; }
+    double raw_gnorm() const { return raw_gnorm_; }
 
 private:
     // ── configuration ────────────────────────────────────────────────────────
@@ -64,7 +67,9 @@ private:
     double stpmax_{1.0e+20};
 
     // ── iteration state ───────────────────────────────────────────────────────
-    double gnorm_{1.0};
+    double raw_gnorm_{1.0};
+    double crit_conv_{1.0};
+    bool   monitor_{false};
 
     // ── L-BFGS core: mirrors the Fortran LBFGS subroutine ───────────────────
     // Returns IFLAG: 1 = needs f/g evaluation, 0 = converged, <0 = error.
@@ -99,6 +104,10 @@ private:
                        bool&   brackt,
                        double  stpmin, double stpmax,
                        int&    info);
+
+    void print_monitor_initial(int n, double f, double critc) const;
+    void print_monitor_iteration(int iter, int nfun, double f, double critc,
+                                 double stp, bool finish) const;
 
     // ── persistent LBFGS state (mirrors Fortran SAVE variables) ─────────────
     bool   lbfgs_initialized_{false};

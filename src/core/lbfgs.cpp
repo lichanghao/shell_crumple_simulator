@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
+#include <iostream>
 #include <vector>
 
 namespace fce {
@@ -35,8 +37,8 @@ void vec_axpy(int n, double alpha, const double* x, double* y) {
 
 // ─── LbfgsSolver ─────────────────────────────────────────────────────────────
 
-LbfgsSolver::LbfgsSolver(int m, double eps, double xtol, int max_eval)
-    : m_(m), eps_(eps), xtol_(xtol), max_eval_(max_eval) {}
+LbfgsSolver::LbfgsSolver(int m, double eps, double xtol, int max_eval, bool monitor)
+    : m_(m), eps_(eps), xtol_(xtol), max_eval_(max_eval), monitor_(monitor) {}
 
 void LbfgsSolver::reset() {
     lbfgs_initialized_ = false;
@@ -45,9 +47,56 @@ void LbfgsSolver::reset() {
     nfun_ = 0;
     point_ = 0;
     finish_ = false;
-    gnorm_ = 1.0;
+    raw_gnorm_ = 1.0;
+    crit_conv_ = 1.0;
     stp_ = 1.0;
     nfev_ls_ = 0;
+}
+
+void LbfgsSolver::print_monitor_initial(const int n, const double f, const double critc) const {
+    if (!monitor_) return;
+
+    auto old_flags = std::cout.flags();
+    auto old_precision = std::cout.precision();
+
+    std::cout << "*************************************************\n";
+    std::cout << "  N=" << std::setw(5) << n
+              << "   NUMBER OF CORRECTIONS=" << m_ << "\n";
+    std::cout << "       INITIAL VALUES\n";
+    std::cout << std::uppercase << std::scientific << std::setprecision(3)
+              << " F= " << std::setw(10) << f
+              << "   CRITC= " << std::setw(10) << critc << "\n";
+    std::cout << "*************************************************\n\n";
+    std::cout << "   I   NFN    FUNC        GNORM       STEPLENGTH\n\n";
+
+    std::cout.flags(old_flags);
+    std::cout.precision(old_precision);
+}
+
+void LbfgsSolver::print_monitor_iteration(const int iter,
+                                          const int nfun,
+                                          const double f,
+                                          const double critc,
+                                          const double stp,
+                                          const bool finish) const {
+    if (!monitor_) return;
+
+    auto old_flags = std::cout.flags();
+    auto old_precision = std::cout.precision();
+
+    std::cout << std::uppercase << std::scientific << std::setprecision(3)
+              << std::setw(4) << iter
+              << std::setw(5) << nfun
+              << "   " << std::setw(10) << f
+              << "  " << std::setw(10) << critc
+              << "  " << std::setw(10) << stp << "\n";
+    if (finish) {
+        std::cout << "\n THE MINIMIZATION TERMINATED WITHOUT DETECTING ERRORS.\n";
+        std::cout << " IFLAG = 0, NUMITER: " << std::setw(6) << iter << "\n";
+    }
+
+    std::cout.flags(old_flags);
+    std::cout.precision(old_precision);
 }
 
 // ─── minimize ────────────────────────────────────────────────────────────────
@@ -150,13 +199,16 @@ int LbfgsSolver::lbfgs_step(int n,
             w[static_cast<std::size_t>(ispt + i)] = -g[i] * diag[i];
         }
 
-        gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
-        stp1_  = 1.0 / gnorm_;
+        raw_gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
+        stp1_  = 1.0 / raw_gnorm_;
+        crit_conv_ = raw_gnorm_;
 
         // Fortran FTOL/MAXFEV already set as constants above.
 
         // Save current gradient in W[0..N-1] (for gradient difference later).
         for (int i = 0; i < n; ++i) w[static_cast<std::size_t>(i)] = g[i];
+
+        print_monitor_initial(n, f, crit_conv_);
 
         // Initial step (STP=STP1 at iter==1).
         stp = stp1_;
@@ -202,11 +254,12 @@ int LbfgsSolver::lbfgs_step(int n,
         if (point_ == m_) point_ = 0;
 
         // Termination test.
-        gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
-        double crit = gnorm_ / 100.0 + std::abs(ddx) / xnorm0;
+        raw_gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
+        crit_conv_ = raw_gnorm_ / 100.0 + std::abs(ddx) / xnorm0;
         stp_ = stp;
         ddx_out = ddx;
-        if (crit <= eps_) {
+        print_monitor_iteration(iter_, nfun_, f, crit_conv_, stp, crit_conv_ <= eps_);
+        if (crit_conv_ <= eps_) {
             finish_ = true;
             return 0;
         }
@@ -372,11 +425,12 @@ int LbfgsSolver::lbfgs_step(int n,
         }
         point_++;
         if (point_ == m_) point_ = 0;
-        gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
-        double crit = gnorm_ / 100.0 + std::abs(ddx) / xnorm0;
+        raw_gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
+        crit_conv_ = raw_gnorm_ / 100.0 + std::abs(ddx) / xnorm0;
         stp_ = stp;
         ddx_out = ddx;
-        return (crit <= eps_) ? 0 : 1;
+        print_monitor_iteration(iter_, nfun_, f, crit_conv_, stp, crit_conv_ <= eps_);
+        return (crit_conv_ <= eps_) ? 0 : 1;
     }
 }
 
