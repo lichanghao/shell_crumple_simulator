@@ -77,7 +77,7 @@ Cyclic `nCodeLoad=30/31`, irreversible crease memory, checkpoint/restart, and mu
 - Treat all on-disk indices as 1-based unless the file format explicitly says otherwise.
 - Prefer archived Fortran artifacts over regenerated C++ artifacts when proving parity.
 - Distinguish preprocessor-side `nvdw=1` progress from runtime vdW/self-contact progress; they are not interchangeable.
-- Treat the injected `imperfection_trace_cpp.dat` fixture as a determinism aid for debugging, not as frozen Fortran provenance.
+- Treat the committed `imperfection_trace_fortran.dat` fixture as a frozen record of the Fortran `pasapas.f90` imperfection slot, not as proof that executable-path AC-7 parity is already solved.
 
 ## Recommended next steps
 

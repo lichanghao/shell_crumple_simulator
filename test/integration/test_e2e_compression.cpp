@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -32,8 +33,8 @@ const fs::path kSelfContactCaseDir =
     fs::path(ORACLE_DIR) / "graphene_self_contact" / "prepro_run";
 const fs::path kXmlValidatorScript =
     fs::path(ORACLE_DIR).parent_path() / "support" / "validate_vtk_xml.py";
-const fs::path kReplayTraceFixture =
-    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_cpp.dat";
+const fs::path kFortranTraceFixture =
+    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_fortran.dat";
 const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
 
 struct DataRow {
@@ -132,6 +133,20 @@ std::string read_file(const fs::path& path) {
         throw std::runtime_error("cannot open file: " + path.string());
     }
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+std::vector<double> read_trace_values(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open trace file: " + path.string());
+    }
+
+    std::vector<double> values;
+    std::string token;
+    while (in >> token) {
+        values.push_back(fce::io::parse_fortran_double(token));
+    }
+    return values;
 }
 
 std::vector<double> parse_numeric_payload(const std::string& payload) {
@@ -542,11 +557,24 @@ protected:
     }
 };
 
+TEST(CompressionCaseFiles, ArchivedFortranImperfectionTraceFixtureIsNonSynthetic) {
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
+
+    const auto values = read_trace_values(kFortranTraceFixture);
+    ASSERT_EQ(values.size(), 50U);
+
+    const auto [min_it, max_it] = std::minmax_element(values.begin(), values.end());
+    ASSERT_NE(min_it, values.end());
+    ASSERT_NE(max_it, values.end());
+    EXPECT_LT(*min_it, *max_it);
+    EXPECT_NE(values.front(), 1.0) << "archived trace unexpectedly reverted to the old all-ones placeholder";
+}
+
 TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtifacts) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
-    ASSERT_TRUE(fs::exists(kReplayTraceFixture)) << "Missing replay trace fixture at " << kReplayTraceFixture;
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
 
-    install_replay_trace(temp_case_dir_, kReplayTraceFixture);
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
 
     const std::string command =
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 50";
@@ -649,9 +677,9 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
 
 TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
-    ASSERT_TRUE(fs::exists(kReplayTraceFixture)) << "Missing replay trace fixture at " << kReplayTraceFixture;
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
 
-    install_replay_trace(temp_case_dir_, kReplayTraceFixture);
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
 
     const std::string command =
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
