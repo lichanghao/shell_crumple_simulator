@@ -249,6 +249,7 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
     LbfgsSolver solver(10, eps, 1.0e-12, 10000);
 
     EnergyComponents final_E{};
+    AssemblyResult final_asm{};
 
     auto callback = [&](const std::vector<double>& xv)
         -> std::pair<double, std::vector<double>>
@@ -262,6 +263,7 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
 
         // Assemble energy and forces.
         const auto res = assemble_energy_forces(input, state, mpi);
+        final_asm = res;
         final_E = to_energy_components(res);
 
         // Gather gradient at free DOFs only (mirrors Fortran g_short).
@@ -281,14 +283,16 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
             x_free.at(static_cast<std::size_t>(i));
     }
 
-    // Final energy evaluation (mirrors Fortran post-minimize_free energy call).
-    const auto final_res = assemble_energy_forces(input, state, mpi);
-    final_E = to_energy_components(final_res);
+    if (flag > 0) {
+        final_asm = assemble_energy_forces(input, state, mpi);
+        final_E = to_energy_components(final_asm);
+    }
 
     MinimizeFreeResult result;
     result.E     = final_E;
     result.gnorm = gnorm;
     result.E_min = final_E.E_total;
+    result.assembly = final_asm;
 
     (void)flag;
     return result;
@@ -312,15 +316,18 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     LbfgsSolver solver(10, eps, 1.0e-12, 20000);
 
     EnergyComponents final_E{};
+    AssemblyResult final_asm{};
 
     auto callback = [&](const std::vector<double>& xv)
         -> std::pair<double, std::vector<double>>
     {
-        // Scatter free DOFs back into coords (BC DOFs stay fixed).
-        load_ctrl.to_full(xv, state.coords);
+        // Mirror Fortran long(...): scatter free DOFs and restore BC DOFs
+        // from x0_BC before each energy evaluation.
+        load_ctrl.scatter_all(xv, state.coords);
 
         // Assemble.
         const auto res = assemble_energy_forces(input, state, mpi);
+        final_asm = res;
         final_E = to_energy_components(res);
 
         // Gradient at free DOFs.
@@ -333,17 +340,19 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     double gnorm = solver.gnorm();
     bcast_solver_state(mpi, flag, gnorm, x_free);
 
-    // Final scatter.
-    load_ctrl.to_full(x_free, state.coords);
+    // Final scatter mirrors Fortran long(...).
+    load_ctrl.scatter_all(x_free, state.coords);
 
-    // Evaluate one more time to get final energy (mirrors Fortran label 50 long call).
-    const auto final_res = assemble_energy_forces(input, state, mpi);
-    final_E = to_energy_components(final_res);
+    if (flag > 0) {
+        final_asm = assemble_energy_forces(input, state, mpi);
+        final_E = to_energy_components(final_asm);
+    }
 
     MinimizeResult result;
     result.E     = final_E;
     result.gnorm = gnorm;
     result.E_min = final_E.E_total;
+    result.assembly = final_asm;
 
     (void)flag;
     return result;
@@ -429,9 +438,8 @@ void pasapas(const SimulatorInput& input,
         // Constrained minimisation.
         auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps);
 
-        // Compute reaction forces.
-        const auto asm_res = assemble_energy_forces(input, state, mpi);
-        const auto forces_real = real_node_forces(asm_res, input.mesh.numnods);
+        // Reuse the last converged assembly, matching the Fortran runtime path.
+        const auto forces_real = real_node_forces(min_res.assembly, input.mesh.numnods);
 
         double reaction1 = 0.0, reaction2 = 0.0;
         load_ctrl.compute_reaction(forces_real, reaction1, reaction2);

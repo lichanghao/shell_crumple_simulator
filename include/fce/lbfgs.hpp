@@ -113,6 +113,7 @@ private:
     bool   mcsrch_initialized_{false};
     bool   brackt_{false};
     bool   stage1_{true};
+    int    nfev_ls_{0};
     int    infoc_{1};
     double dginit_{0.0};
     double dgtest_{0.0};

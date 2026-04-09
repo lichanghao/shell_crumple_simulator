@@ -789,6 +789,36 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays)
     EXPECT_EQ(generated_datasets[1].file, oracle_datasets[1].file);
 }
 
+TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTrace) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
+
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
+
+    const std::string command =
+        shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
+    ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
+
+    const auto actual_energy = read_positive_load_rows(temp_case_dir_ / "energy.dat", /*skip_header=*/true);
+    const auto oracle_energy = read_positive_load_rows(kCaseDir / "energy.dat", /*skip_header=*/true);
+    ASSERT_FALSE(actual_energy.empty());
+    ASSERT_FALSE(oracle_energy.empty());
+    ASSERT_GE(actual_energy.front().values.size(), 2U);
+    ASSERT_GE(oracle_energy.front().values.size(), 2U);
+    EXPECT_NEAR(actual_energy.front().values[0], oracle_energy.front().values[0], 1e-12);
+    EXPECT_LE(relative_error(actual_energy.front().values[1], oracle_energy.front().values[1], 1e-12), 1e-4);
+
+    const auto actual_force = read_positive_load_rows(temp_case_dir_ / "force.dat", /*skip_header=*/false);
+    const auto oracle_force = read_positive_load_rows(kCaseDir / "force.dat", /*skip_header=*/false);
+    ASSERT_FALSE(actual_force.empty());
+    ASSERT_FALSE(oracle_force.empty());
+    ASSERT_EQ(actual_force.front().values.size(), oracle_force.front().values.size());
+    for (std::size_t col = 0; col < oracle_force.front().values.size(); ++col) {
+        EXPECT_LE(relative_error(actual_force.front().values[col], oracle_force.front().values[col], 1e-12), 1e-3)
+            << "step1 force col " << col;
+    }
+}
+
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
     const auto input = fce::load_simulator_input(temp_case_dir_.string());
     const std::array<int, 3> replay_steps{1, 25, 50};

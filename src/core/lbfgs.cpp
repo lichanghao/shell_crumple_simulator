@@ -47,6 +47,7 @@ void LbfgsSolver::reset() {
     finish_ = false;
     gnorm_ = 1.0;
     stp_ = 1.0;
+    nfev_ls_ = 0;
 }
 
 // ─── minimize ────────────────────────────────────────────────────────────────
@@ -412,7 +413,8 @@ int LbfgsSolver::mcsrch(int n,
 
         brackt_  = false;
         stage1_  = true;
-        nfev     = 0;
+        nfev_ls_ = 0;
+        nfev     = nfev_ls_;
         finit_   = f;
         dgtest_  = ftol * dginit_;
         width_   = stpmax_ - stpmin_;
@@ -426,7 +428,8 @@ int LbfgsSolver::mcsrch(int n,
         mcsrch_initialized_ = true;
     } else {
         // Re-entry: process the new f/g.
-        nfev++;
+        nfev_ls_++;
+        nfev = nfev_ls_;
         double dg = zero;
         for (int j = 0; j < n; ++j) dg += g[j] * s[j];
 
@@ -491,6 +494,25 @@ int LbfgsSolver::mcsrch(int n,
         }
     }
 
+    double stmin_eval, stmax_eval;
+    if (brackt_) {
+        stmin_eval = std::min(stx_, sty_);
+        stmax_eval = std::max(stx_, sty_);
+    } else {
+        stmin_eval = stx_;
+        stmax_eval = stp + xtrapf * (stp - stx_);
+    }
+
+    // Mirror the Fortran label-30 safeguards before requesting another f/g.
+    stp = std::max(stp, stpmin_);
+    stp = std::min(stp, stpmax_);
+    if ((brackt_ && (stp <= stmin_eval || stp >= stmax_eval)) ||
+        nfev_ls_ >= maxfev - 1 ||
+        infoc_ == 0 ||
+        (brackt_ && stmax_eval - stmin_eval <= xtol_arg * stmax_eval)) {
+        stp = stx_;
+    }
+
     // Compute new trial x.
     double slen = 0.0;
     for (int j = 0; j < n; ++j) {
@@ -498,6 +520,7 @@ int LbfgsSolver::mcsrch(int n,
         slen += s[j] * s[j];
     }
     ddx = stp * std::sqrt(slen);
+    nfev = nfev_ls_;
     return -1;  // needs f/g evaluation
 }
 

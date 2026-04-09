@@ -44,6 +44,7 @@ struct MinimizeFreeResult {
     EnergyComponents E{};
     double gnorm{0.0};
     double E_min{0.0};
+    AssemblyResult assembly{};
 };
 
 MinimizeFreeResult minimize_free(const SimulatorInput& input,
@@ -59,6 +60,7 @@ struct MinimizeResult {
     EnergyComponents E{};
     double gnorm{0.0};
     double E_min{0.0};
+    AssemblyResult assembly{};
 };
 
 MinimizeResult minimize_constrained(const SimulatorInput& input,
