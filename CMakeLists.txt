@@ -126,7 +126,10 @@ target_link_libraries(integration_tests PRIVATE
 target_include_directories(integration_tests PRIVATE
   ${CMAKE_SOURCE_DIR}/test/support
 )
-gtest_discover_tests(integration_tests)
+gtest_discover_tests(integration_tests
+  TEST_LIST integration_test_list
+  PROPERTIES TIMEOUT 180
+)
 
 # Pass oracle path to tests
 target_compile_definitions(integration_tests PRIVATE
