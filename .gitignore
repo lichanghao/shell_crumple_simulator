@@ -41,7 +41,7 @@ Eofnode*
 !**/README.dat
 
 # Test-case build and run directories
-test/*
+test/cases/*
 document/*
 build/*
 
