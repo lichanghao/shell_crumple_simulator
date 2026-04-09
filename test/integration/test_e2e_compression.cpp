@@ -1,4 +1,6 @@
 #include "fce/io.hpp"
+#include "fce/runtime_output.hpp"
+#include "fce/simulator.hpp"
 
 #include <gtest/gtest.h>
 
@@ -26,6 +28,8 @@ namespace fs = std::filesystem;
 
 const fs::path kCaseDir =
     fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+const fs::path kSelfContactCaseDir =
+    fs::path(ORACLE_DIR) / "graphene_self_contact" / "prepro_run";
 const fs::path kReplayTraceFixture =
     fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_cpp.dat";
 const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
@@ -242,6 +246,86 @@ std::vector<int> read_vtu_integer_array(const fs::path& path, const std::string&
         extract_xml_data_array_payload(read_file(path), "Name=\"" + name + "\""));
 }
 
+fce::RuntimeState replay_state_from_oracle_vtu(const fs::path& path,
+                                               const fce::SimulatorInput& input) {
+    fce::RuntimeState state;
+    state.coords = read_vtu_points(path, input.mesh.numnods);
+
+    const auto averaged_eta = read_vtu_inner_displacement(path);
+    if (static_cast<int>(averaged_eta.size()) != input.mesh.numele) {
+        throw std::runtime_error("oracle VTU inner_displacement count does not match mesh.numele");
+    }
+
+    state.eta.resize(static_cast<std::size_t>(input.mesh.numele));
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        const fce::Vec2 eta_avg{
+            averaged_eta[static_cast<std::size_t>(ielem)][0],
+            averaged_eta[static_cast<std::size_t>(ielem)][1],
+        };
+        state.eta[static_cast<std::size_t>(ielem)].assign(
+            static_cast<std::size_t>(input.dims.ngauss), eta_avg);
+    }
+    return state;
+}
+
+std::vector<double> expected_atomic_density_from_loaded_vdw(const fce::SimulatorInput& input) {
+    std::vector<double> rho_nodal(static_cast<std::size_t>(input.mesh.numnods), 0.0);
+    std::vector<double> weight_nodal(static_cast<std::size_t>(input.mesh.numnods), 0.0);
+    if (input.vdw.nvdw != 1 || input.vdw.rho.empty() || input.vdw.shapef.empty()) {
+        return rho_nodal;
+    }
+
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        const auto& connect = input.mesh.connect.at(static_cast<std::size_t>(ielem));
+        for (int ig = 0; ig < input.vdw.ngauss_vdw; ++ig) {
+            const double rho_gp =
+                input.vdw.rho.at(static_cast<std::size_t>(ielem * input.vdw.ngauss_vdw + ig));
+            const auto& shape = input.vdw.shapef.at(static_cast<std::size_t>(ig));
+            for (int inode = 0; inode < 12; ++inode) {
+                const int node_index = connect.neigh_vert[inode];
+                if (node_index < 0 || node_index >= input.mesh.numnods) {
+                    continue;
+                }
+                rho_nodal.at(static_cast<std::size_t>(node_index)) += rho_gp * shape[inode];
+                weight_nodal.at(static_cast<std::size_t>(node_index)) += shape[inode];
+            }
+        }
+    }
+
+    for (int inode = 0; inode < input.mesh.numnods; ++inode) {
+        if (weight_nodal[static_cast<std::size_t>(inode)] > 1.0e-14) {
+            rho_nodal[static_cast<std::size_t>(inode)] /=
+                weight_nodal[static_cast<std::size_t>(inode)];
+        }
+    }
+    return rho_nodal;
+}
+
+std::vector<double> expected_w_density_from_loaded_vdw(const fce::SimulatorInput& input) {
+    std::vector<double> w_density(static_cast<std::size_t>(input.mesh.numele), 0.0);
+    if (input.vdw.nvdw != 1 || input.vdw.rho.empty()) {
+        return w_density;
+    }
+
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        double avg = 0.0;
+        for (int ig = 0; ig < input.vdw.ngauss_vdw; ++ig) {
+            avg += input.vdw.rho.at(static_cast<std::size_t>(ielem * input.vdw.ngauss_vdw + ig));
+        }
+        w_density[static_cast<std::size_t>(ielem)] = avg / static_cast<double>(input.vdw.ngauss_vdw);
+    }
+    return w_density;
+}
+
+bool has_strictly_positive_entry(const std::vector<double>& values) {
+    for (const double value : values) {
+        if (value > 0.0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 fce::Vec3 averaged_eta(const fce::EtaField& eta, const int elem, const int ngauss) {
     fce::Vec3 out{0.0, 0.0, 0.0};
     for (int igauss = 0; igauss < ngauss; ++igauss) {
@@ -414,6 +498,24 @@ protected:
         const fs::path temp_root = make_temp_dir();
         temp_case_dir_ = temp_root / "np1";
         fs::copy(kCaseDir, temp_case_dir_, fs::copy_options::recursive);
+        remove_runtime_outputs(temp_case_dir_);
+    }
+
+    void TearDown() override {
+        if (!temp_case_dir_.empty()) {
+            fs::remove_all(temp_case_dir_.parent_path());
+        }
+    }
+};
+
+class RuntimeOutputVdwCase : public ::testing::Test {
+protected:
+    fs::path temp_case_dir_;
+
+    void SetUp() override {
+        const fs::path temp_root = make_temp_dir();
+        temp_case_dir_ = temp_root / "prepro_run";
+        fs::copy(kSelfContactCaseDir, temp_case_dir_, fs::copy_options::recursive);
         remove_runtime_outputs(temp_case_dir_);
     }
 
@@ -639,6 +741,63 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays)
     EXPECT_EQ(generated_datasets[0].file, oracle_datasets[0].file);
     EXPECT_NEAR(generated_datasets[1].timestep, oracle_datasets[1].timestep, 1e-12);
     EXPECT_EQ(generated_datasets[1].file, oracle_datasets[1].file);
+}
+
+TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    const std::array<int, 3> replay_steps{1, 25, 50};
+
+    for (const int step : replay_steps) {
+        const fs::path oracle_snapshot = kCaseDir / fce::snapshot_filename(step);
+        ASSERT_TRUE(fs::exists(oracle_snapshot)) << "Missing archived VTU " << oracle_snapshot;
+
+        const auto state = replay_state_from_oracle_vtu(oracle_snapshot, input);
+        ASSERT_NO_THROW(fce::write_mesh_snapshot(input, state, temp_case_dir_.string(), step));
+
+        const fs::path generated_snapshot = temp_case_dir_ / fce::snapshot_filename(step);
+        ASSERT_TRUE(fs::exists(generated_snapshot));
+        expect_vtu_matches_archive(generated_snapshot, oracle_snapshot, input.dims, 1e-12);
+    }
+
+    ASSERT_NO_THROW(fce::write_mesh_series_index(temp_case_dir_.string(), input.bcs, 50));
+    const auto datasets = read_pvd_datasets(temp_case_dir_ / "mesh_config_series.pvd");
+    ASSERT_EQ(datasets.size(), replay_steps.size());
+    for (std::size_t i = 0; i < replay_steps.size(); ++i) {
+        const int step = replay_steps[i];
+        EXPECT_EQ(datasets[i].file, fce::snapshot_filename(step));
+        EXPECT_NEAR(datasets[i].timestep,
+                    read_vtu_time_value(kCaseDir / fce::snapshot_filename(step)),
+                    1e-12);
+    }
+}
+
+TEST_F(RuntimeOutputVdwCase, LoadedVdwCaseWritesNonzeroDensityArrays) {
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_FALSE(input.vdw.rho.empty());
+    ASSERT_FALSE(input.vdw.shapef.empty());
+
+    const auto state = fce::make_runtime_state(input);
+    ASSERT_NO_THROW(fce::write_mesh_snapshot(input, state, temp_case_dir_.string(), 0));
+
+    const fs::path snapshot = temp_case_dir_ / fce::snapshot_filename(0);
+    ASSERT_TRUE(fs::exists(snapshot));
+
+    const auto generated_points = read_vtu_points(snapshot, input.mesh.numnods);
+    ASSERT_EQ(generated_points.size(), static_cast<std::size_t>(input.mesh.numnods));
+    EXPECT_NEAR(read_vtu_time_value(snapshot), 0.0, 1e-12);
+
+    const auto generated_atomic_density = read_vtu_scalar_array(snapshot, "atomic_density");
+    const auto generated_w_density = read_vtu_scalar_array(snapshot, "W_density");
+    const auto expected_atomic_density = expected_atomic_density_from_loaded_vdw(input);
+    const auto expected_w_density = expected_w_density_from_loaded_vdw(input);
+
+    ASSERT_EQ(generated_atomic_density.size(), expected_atomic_density.size());
+    ASSERT_EQ(generated_w_density.size(), expected_w_density.size());
+    EXPECT_LE(max_relative_error(generated_atomic_density, expected_atomic_density, 1e-12), 1e-12);
+    EXPECT_LE(max_relative_error(generated_w_density, expected_w_density, 1e-12), 1e-12);
+    EXPECT_TRUE(has_strictly_positive_entry(generated_atomic_density));
+    EXPECT_TRUE(has_strictly_positive_entry(generated_w_density));
 }
 
 TEST_F(E2ECompression, CrunchItReusesRecordedImperfectionTraceDeterministically) {
