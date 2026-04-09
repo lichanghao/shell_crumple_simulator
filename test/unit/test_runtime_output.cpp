@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -13,6 +14,9 @@
 namespace {
 
 namespace fs = std::filesystem;
+
+const fs::path kXmlValidatorScript =
+    fs::path(ORACLE_DIR).parent_path() / "support" / "validate_vtk_xml.py";
 
 fs::path make_temp_dir() {
     std::array<char, 256> pattern{};
@@ -34,6 +38,22 @@ std::string read_file(const fs::path& path) {
         throw std::runtime_error("cannot open file: " + path.string());
     }
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+std::string shell_quote(const fs::path& path) {
+    return "\"" + path.string() + "\"";
+}
+
+void expect_xml_loadable(const std::vector<fs::path>& paths) {
+    ASSERT_TRUE(fs::exists(kXmlValidatorScript)) << "Missing XML validator at " << kXmlValidatorScript;
+
+    std::string command = "python3 " + shell_quote(kXmlValidatorScript);
+    for (const auto& path : paths) {
+        ASSERT_TRUE(fs::exists(path)) << "Missing XML file " << path;
+        command += " " + shell_quote(path);
+    }
+
+    EXPECT_EQ(std::system(command.c_str()), 0) << "Failed XML validation command: " << command;
 }
 
 fce::SimulatorInput make_minimal_input() {
@@ -76,6 +96,7 @@ TEST(RuntimeOutput, WritesCanonicalZeroDensityFields) {
 
     ASSERT_NO_THROW(fce::write_mesh_snapshot(input, state, temp_dir.string(), 1));
     ASSERT_NO_THROW(fce::write_mesh_series_index(temp_dir.string(), input.bcs, 1));
+    expect_xml_loadable({temp_dir / "mesh_config_0001.vtu", temp_dir / "mesh_config_series.pvd"});
 
     const std::string xml = read_file(temp_dir / "mesh_config_0001.vtu");
     EXPECT_NE(xml.find("<PointData Scalars=\"atomic_density\">"), std::string::npos);
@@ -106,6 +127,7 @@ TEST(RuntimeOutput, FallsBackToZeroDensityWhenNvdwIsEnabledButRhoIsMissing) {
     const fs::path temp_dir = make_temp_dir();
 
     ASSERT_NO_THROW(fce::write_mesh_snapshot(input, state, temp_dir.string(), 1));
+    expect_xml_loadable({temp_dir / "mesh_config_0001.vtu"});
 
     const std::string xml = read_file(temp_dir / "mesh_config_0001.vtu");
     EXPECT_NE(xml.find("Name=\"atomic_density\""), std::string::npos);

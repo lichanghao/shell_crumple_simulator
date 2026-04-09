@@ -30,6 +30,8 @@ const fs::path kCaseDir =
     fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
 const fs::path kSelfContactCaseDir =
     fs::path(ORACLE_DIR) / "graphene_self_contact" / "prepro_run";
+const fs::path kXmlValidatorScript =
+    fs::path(ORACLE_DIR).parent_path() / "support" / "validate_vtk_xml.py";
 const fs::path kReplayTraceFixture =
     fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_cpp.dat";
 const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
@@ -110,6 +112,18 @@ fs::path make_temp_dir() {
 
 std::string shell_quote(const fs::path& path) {
     return "\"" + path.string() + "\"";
+}
+
+void expect_xml_loadable(const std::vector<fs::path>& paths) {
+    ASSERT_TRUE(fs::exists(kXmlValidatorScript)) << "Missing XML validator at " << kXmlValidatorScript;
+
+    std::string command = "python3 " + shell_quote(kXmlValidatorScript);
+    for (const auto& path : paths) {
+        ASSERT_TRUE(fs::exists(path)) << "Missing XML file " << path;
+        command += " " + shell_quote(path);
+    }
+
+    EXPECT_EQ(std::system(command.c_str()), 0) << "Failed XML validation command: " << command;
 }
 
 std::string read_file(const fs::path& path) {
@@ -365,6 +379,8 @@ void expect_vtu_matches_archive(const fs::path& generated,
                                 const fs::path& oracle,
                                 const fce::io::DimsData& dims,
                                 const double tol) {
+    expect_xml_loadable({generated, oracle});
+
     EXPECT_LE(relative_error(read_vtu_time_value(generated), read_vtu_time_value(oracle), 1e-12), tol)
         << "time " << generated.filename();
 
@@ -576,6 +592,7 @@ TEST_F(E2ECompression, CrunchItMatchesArchivedFortranOracleAndWritesRuntimeArtif
 
     const auto actual_pvd = read_pvd_datasets(pvd_path);
     const auto oracle_pvd = read_pvd_datasets(kCaseDir / "mesh_config_series.pvd");
+    expect_xml_loadable({pvd_path, kCaseDir / "mesh_config_series.pvd"});
     ASSERT_EQ(actual_pvd.size(), oracle_pvd.size());
     for (std::size_t i = 0; i < oracle_pvd.size(); ++i) {
         EXPECT_NEAR(actual_pvd[i].timestep, oracle_pvd[i].timestep, 1e-12)
@@ -652,6 +669,7 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays)
 
     const fs::path oracle_step0 = kCaseDir / "mesh_config_0000.vtu";
     const fs::path oracle_pvd = kCaseDir / "mesh_config_series.pvd";
+    expect_xml_loadable({generated_step0, generated_step1, generated_pvd, oracle_step0, oracle_pvd});
 
     const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
     const auto generated_points = read_vtu_points(generated_step0, dims.numnods);
@@ -782,6 +800,7 @@ TEST_F(RuntimeOutputVdwCase, LoadedVdwCaseWritesNonzeroDensityArrays) {
 
     const fs::path snapshot = temp_case_dir_ / fce::snapshot_filename(0);
     ASSERT_TRUE(fs::exists(snapshot));
+    expect_xml_loadable({snapshot});
 
     const auto generated_points = read_vtu_points(snapshot, input.mesh.numnods);
     ASSERT_EQ(generated_points.size(), static_cast<std::size_t>(input.mesh.numnods));
