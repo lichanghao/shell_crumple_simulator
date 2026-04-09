@@ -21,6 +21,12 @@
 - I did not advance AC-7, AC-8, AC-9, AC-10, AC-11, or the remaining executable-path portion of AC-12 in this round.
 - `task8d` was attempted honestly but did not complete because the full suite stalled inside the known long executable-path compression regression.
 
+## BitLesson Delta
+
+- Action: none
+- Lesson ID(s): NONE
+- Notes: I re-read `.humanize/bitlesson.md` and attempted `bitlesson-select.sh` for the AC-13 documentation task, but the selector produced no usable output and this round did not add or revise a reusable lesson beyond the existing entries.
+
 ## Goal Tracker Update Request
 
 ### Requested Changes:
