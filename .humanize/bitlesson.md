@@ -159,3 +159,13 @@ Solution: Before editing the imperfection formula, measure the per-axis VTU poin
 Constraints: This lesson applies to the archived compression replay path with `imperfection_trace_fortran.dat`. It does not rule out all imperfection-related bugs, only the simplistic `a -> 1-a` sign-flip hypothesis for step 1.
 Validation Evidence: Fresh temp-case probes showed the original frozen trace still produces step-1 energy `6.37022e-05`, while flipping only the first trace value produces `4.68579e-05`; the same probe showed the current mismatch is overwhelmingly in `z`, with much smaller `x`/`y` point deltas.
 Source Rounds: 0
+
+## Lesson: archived-step0-vtu-is-not-post-free-state
+Lesson ID: BL-20260410-step0-vtu-pre-free
+Scope: Optim.f90, pasapas.f90, src/core/solver.cpp, AC-7 executable-path replay
+Problem Description: The archived compression case appears to show perfect step-0 VTU parity, but that visible `mesh_config_0000.vtu` snapshot is a misleading proxy when debugging the first constrained load step.
+Root Cause: Canonical Fortran writes `mesh_config_0000.vtu` in `Optim.f90` before `pasapas()` runs `minimize_free`. The hidden state that actually enters load step 1 is therefore not captured by the archived step-0 VTU. A same-trace Fortran probe on the original `nano_*.dat` inputs showed that the pre-step-1 state is already non-flat, while the current C++ post-free state remains flat.
+Solution: When debugging AC-7 step 1, compare the hidden post-`minimize_free` state directly (or recover it from a pre-step-1 dump by undoing the BC increment and imperfection) instead of treating `mesh_config_0000.vtu` parity as evidence that the free-minimization path already matches Fortran.
+Constraints: This lesson is about the executable-path compression replay. It does not change the public VTU contract; it only warns that the archived step-0 VTU is a pre-free-minimize artifact.
+Validation Evidence: A disposable same-trace Fortran probe on the original repo inputs wrote `pre_minimize_coords_step1.dat`; after undoing the step-1 BC increment and uniform imperfection, the recovered hidden free state still differed from the current C++ post-free state by about `4.175e-02` in `x`, `5.234e-02` in `y`, and `1.047e-01` in `z`.
+Source Rounds: 1

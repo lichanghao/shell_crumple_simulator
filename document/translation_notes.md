@@ -64,6 +64,9 @@ Recent repository-grounded debugging narrowed that mismatch further:
 - Under the frozen Fortran-backed imperfection trace, the step-1 outer-coordinate error is dominated by the physical `z` direction rather than the in-plane `x`/`y` coordinates.
 - The generated step-1 VTU `inner_displacement` field already matches the archived oracle, so the remaining defect is in the outer-coordinate trajectory rather than in the averaged `eta` output path.
 - Reflecting only the first imperfection-trace value around `0.5` is a false lead: the step-1 energy moves farther away from the archived oracle, not closer.
+- A same-trace Fortran probe showed that the archived `mesh_config_0000.vtu` is not the post-`minimize_free` state. In the canonical runtime, `Optim.f90` writes `mesh_config_0000.vtu` before `pasapas()` runs, so matching that visible step-0 artifact does not prove the hidden state entering load step 1 is correct.
+- Replaying the canonical Fortran step-1 entry on the original `nano_*.dat` inputs showed that the hidden pre-step-1 state is already non-flat before the constrained minimizer starts. Undoing the step-1 BC increment and uniform imperfection from that Fortran dump still leaves a free-state mismatch versus the current C++ post-free state of about `4.175e-02` in `x`, `5.234e-02` in `y`, and `1.047e-01` in `z`.
+- That means the stable AC-7 blocker is no longer just “step-1 constrained solve differs.” The divergence is already present in the state handed from `minimize_free` into the first constrained load step, so future work should compare the post-free hidden state itself rather than using `mesh_config_0000.vtu` as a proxy.
 
 ### AC-8 runtime vdW
 
