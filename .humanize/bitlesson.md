@@ -149,3 +149,13 @@ Solution: Add an optional case-local `imperfection_trace.dat` contract carrying 
 Constraints: This fixes reproducibility for replay and debugging; it does not prove the injected trace matches the original archived Fortran run. When the trace file is absent, the runtime still mirrors the source-shaped entropy-backed behavior.
 Validation Evidence: `E2ECompression.CrunchItReusesRecordedImperfectionTraceDeterministically` and `E2ECompression.CrunchItRejectsShortImperfectionTrace` pass; repeated step-1 probes on fresh copies of the archived compression case now both produce `5.74298201e-05` with the checked-in trace.
 Source Rounds: 35
+
+## Lesson: step-one-z-drift-is-not-fixed-by-trace-sign-flip
+Lesson ID: BL-20260410-step1-z-drift
+Scope: src/core/solver.cpp, test/cases/graphene_compression_simulator, AC-7 executable-path replay
+Problem Description: Under the frozen Fortran-backed imperfection trace, the step-1 executable-path mismatch looked superficially like a wrong-sign imperfection bug because the generated step-1 sheet bends the wrong way out of plane while the in-plane coordinates stay much closer to the oracle.
+Root Cause: The repository-grounded probe showed the remaining mismatch is dominated by the physical `z` coordinate, but simply reflecting the first trace value around `0.5` is not the missing fix. That change moves the step-1 energy farther away from the archived oracle, so the residual defect lies deeper in the constrained outer-coordinate trajectory than in a naive imperfection-sign convention.
+Solution: Before editing the imperfection formula, measure the per-axis VTU point deltas and test the sign-flip hypothesis on a disposable temp case. If flipping only the first trace value worsens the energy mismatch, keep the trace contract unchanged and continue debugging the constrained outer-coordinate path instead.
+Constraints: This lesson applies to the archived compression replay path with `imperfection_trace_fortran.dat`. It does not rule out all imperfection-related bugs, only the simplistic `a -> 1-a` sign-flip hypothesis for step 1.
+Validation Evidence: Fresh temp-case probes showed the original frozen trace still produces step-1 energy `6.37022e-05`, while flipping only the first trace value produces `4.68579e-05`; the same probe showed the current mismatch is overwhelmingly in `z`, with much smaller `x`/`y` point deltas.
+Source Rounds: 0

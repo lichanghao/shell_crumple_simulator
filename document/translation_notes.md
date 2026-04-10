@@ -59,6 +59,12 @@ This document records the current C++ translation status against the canonical F
 
 The main executable-path regression is still red. The archived compression harness is deterministic now, but the live C++ solver path still diverges from the archived Fortran trajectory in energy, reaction force, and `nano_final_config.dat`.
 
+Recent repository-grounded debugging narrowed that mismatch further:
+
+- Under the frozen Fortran-backed imperfection trace, the step-1 outer-coordinate error is dominated by the physical `z` direction rather than the in-plane `x`/`y` coordinates.
+- The generated step-1 VTU `inner_displacement` field already matches the archived oracle, so the remaining defect is in the outer-coordinate trajectory rather than in the averaged `eta` output path.
+- Reflecting only the first imperfection-trace value around `0.5` is a false lead: the step-1 energy moves farther away from the archived oracle, not closer.
+
 ### AC-8 runtime vdW
 
 Preprocessor-side `nvdw=1` translation is present, but simulator-side vdW/self-contact assembly is still absent. That blocks both runtime physics parity and the remaining real-`nvdw=1` VTU evidence.
