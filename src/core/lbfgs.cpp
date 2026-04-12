@@ -137,6 +137,14 @@ int LbfgsSolver::minimize(std::vector<double>& x,
         int iflag = lbfgs_step(n, x, f, g, diag, w, xnorm0, ddx);
 
         if (iflag < 0) {
+            if (monitor_) {
+                std::cout << " LBFGS terminated with IFLAG=" << iflag
+                          << " after " << nfun_ << " function evaluations"
+                          << " (line-search info=" << infoc_
+                          << ", nfev_ls=" << nfev_ls_
+                          << ", stp=" << stp_
+                          << ", dginit=" << dginit_ << ")\n";
+            }
             // Line search failure — Fortran continues (goto 50) if f is not NaN.
             return iflag;
         }
