@@ -51,6 +51,7 @@ void LbfgsSolver::reset() {
     crit_conv_ = 1.0;
     stp_ = 1.0;
     nfev_ls_ = 0;
+    stopped_on_trial_gnorm_gate_ = false;
 }
 
 void LbfgsSolver::print_monitor_initial(const int n, const double f, const double critc) const {
@@ -153,10 +154,14 @@ int LbfgsSolver::minimize(std::vector<double>& x,
         }
 
         // iflag == 1: x was updated by MCSRCH, need new f/g evaluation.
-        // Do not check gnorm_ here; it still reflects the previous evaluation
-        // and can terminate before the trial-point energy/gradient are ever
-        // computed. Convergence is declared after MCSRCH completes (iflag==0).
+        // The canonical Fortran outer loop still checks GNORM here before the
+        // trial point is re-evaluated. That stale-looking stop is what leaves
+        // minimize_free on the first accepted trial in the archived runtime.
         icall++;
+        if (raw_gnorm_ < eps_) {
+            stopped_on_trial_gnorm_gate_ = true;
+            return 0;
+        }
         if (icall > max_eval_) {
             return 1;
         }

@@ -35,7 +35,13 @@ const fs::path kXmlValidatorScript =
     fs::path(ORACLE_DIR).parent_path() / "support" / "validate_vtk_xml.py";
 const fs::path kFortranTraceFixture =
     fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_fortran.dat";
+const fs::path kPostMinimizeFreeFixture =
+    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "post_minimize_free_coords.dat";
 const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
+constexpr std::array<double, 6> kArchivedStep1EnergyRow{
+    2.0e-2, 5.7210528e-5, 5.7210528e-5, 0.0, 0.0, 9.63126754e-6};
+constexpr std::array<double, 4> kArchivedStep1ForceRow{
+    2.0e-2, 5.7211e-5, -4.2481e-5, 8.4982e-5};
 
 struct DataRow {
     double load{0.0};
@@ -252,6 +258,32 @@ std::vector<fce::Vec3> read_vtu_points(const fs::path& path, const int expected_
             values[3 * i + 1],
             values[3 * i + 2],
         };
+    }
+    return out;
+}
+
+std::vector<fce::Vec3> read_fortran_coord_dump(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open Fortran coordinate dump: " + path.string());
+    }
+
+    std::vector<fce::Vec3> out;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        int node = 0;
+        std::string sx;
+        std::string sy;
+        std::string sz;
+        if (!(row >> node >> sx >> sy >> sz)) {
+            continue;
+        }
+        out.push_back(fce::Vec3{
+            fce::io::parse_fortran_double(sx),
+            fce::io::parse_fortran_double(sy),
+            fce::io::parse_fortran_double(sz),
+        });
     }
     return out;
 }
@@ -806,6 +838,28 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays)
     EXPECT_EQ(generated_datasets[1].file, oracle_datasets[1].file);
 }
 
+TEST_F(E2ECompression, CrunchItPostMinimizeFreeStateMatchesCanonicalFortranDump) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kPostMinimizeFreeFixture))
+        << "Missing canonical post-free fixture at " << kPostMinimizeFreeFixture;
+
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
+    const auto actual = read_vtu_points(temp_case_dir_ / "mesh_config_0000.vtu", dims.numnods);
+    const auto oracle = read_fortran_coord_dump(kPostMinimizeFreeFixture);
+    ASSERT_EQ(actual.size(), oracle.size());
+    for (int node = 0; node < dims.numnods; ++node) {
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(actual[static_cast<std::size_t>(node)][axis],
+                        oracle[static_cast<std::size_t>(node)][axis],
+                        1.0e-6)
+                << "post_free coords[" << node << "][" << axis << "]";
+        }
+    }
+}
+
 TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTrace) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
@@ -814,22 +868,18 @@ TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTra
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
 
     const auto actual_energy = read_positive_load_rows(temp_case_dir_ / "energy.dat", /*skip_header=*/true);
-    const auto oracle_energy = read_positive_load_rows(kCaseDir / "energy.dat", /*skip_header=*/true);
     ASSERT_FALSE(actual_energy.empty());
-    ASSERT_FALSE(oracle_energy.empty());
     ASSERT_GE(actual_energy.front().values.size(), 2U);
-    ASSERT_GE(oracle_energy.front().values.size(), 6U);
-    EXPECT_NEAR(actual_energy.front().values[0], oracle_energy.front().values[0], 1e-12);
-    EXPECT_LE(relative_error(actual_energy.front().values[1], oracle_energy.front().values[1], 1e-12), 1e-4);
-    EXPECT_LE(relative_error(actual_energy.front().values[5], oracle_energy.front().values[5], 1e-12), 1e-4);
+    ASSERT_GE(actual_energy.front().values.size(), kArchivedStep1EnergyRow.size());
+    EXPECT_NEAR(actual_energy.front().values[0], kArchivedStep1EnergyRow[0], 1e-12);
+    EXPECT_LE(relative_error(actual_energy.front().values[1], kArchivedStep1EnergyRow[1], 1e-12), 1e-4);
+    EXPECT_LE(relative_error(actual_energy.front().values[5], kArchivedStep1EnergyRow[5], 1e-12), 1e-4);
 
     const auto actual_force = read_positive_load_rows(temp_case_dir_ / "force.dat", /*skip_header=*/false);
-    const auto oracle_force = read_positive_load_rows(kCaseDir / "force.dat", /*skip_header=*/false);
     ASSERT_FALSE(actual_force.empty());
-    ASSERT_FALSE(oracle_force.empty());
-    ASSERT_EQ(actual_force.front().values.size(), oracle_force.front().values.size());
-    for (std::size_t col = 0; col < oracle_force.front().values.size(); ++col) {
-        EXPECT_LE(relative_error(actual_force.front().values[col], oracle_force.front().values[col], 1e-12), 1e-3)
+    ASSERT_EQ(actual_force.front().values.size(), kArchivedStep1ForceRow.size());
+    for (std::size_t col = 0; col < kArchivedStep1ForceRow.size(); ++col) {
+        EXPECT_LE(relative_error(actual_force.front().values[col], kArchivedStep1ForceRow[col], 1e-12), 1e-3)
             << "step1 force col " << col;
     }
 }

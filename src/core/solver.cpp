@@ -300,11 +300,14 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
             x_free.at(static_cast<std::size_t>(i));
     }
 
-    // LBFGS returns the final accepted X, but the last callback can still hold
-    // the previous trial-state assembly. Reassemble after the final scatter so
-    // energy.dat / force.dat reflect the converged coordinates.
-    final_asm = assemble_energy_forces(input, state, mpi);
-    final_E = to_energy_components(final_asm);
+    // Canonical Fortran exits minimize_free on the first IFLAG=1 return when
+    // GNORM < EPS. In that path x_short already holds the trial coordinates,
+    // but E_out / eta still correspond to the previous assembly because the
+    // trial point is never re-evaluated. Preserve that behavior for AC-7.
+    if (!solver.stopped_on_trial_gnorm_gate()) {
+        final_asm = assemble_energy_forces(input, state, mpi);
+        final_E = to_energy_components(final_asm);
+    }
 
     MinimizeFreeResult result;
     result.E     = final_E;
@@ -362,10 +365,13 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     // Final scatter mirrors Fortran long(...).
     load_ctrl.scatter_all(x_free, state.coords);
 
-    // Mirror the free minimizer: recompute at the scattered final state so the
-    // reported energy, forces, and eta correspond to the converged coordinates.
-    final_asm = assemble_energy_forces(input, state, mpi);
-    final_E = to_energy_components(final_asm);
+    // Mirror the free minimizer for the rare GNORM<EPS-on-IFLAG=1 exit:
+    // preserve the last evaluated assembly instead of forcing a trial-point
+    // reassembly the canonical Fortran path never performs.
+    if (!solver.stopped_on_trial_gnorm_gate()) {
+        final_asm = assemble_energy_forces(input, state, mpi);
+        final_E = to_energy_components(final_asm);
+    }
 
     MinimizeResult result;
     result.E     = final_E;

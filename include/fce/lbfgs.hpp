@@ -53,6 +53,7 @@ public:
 
     double gnorm() const { return crit_conv_; }
     double raw_gnorm() const { return raw_gnorm_; }
+    bool stopped_on_trial_gnorm_gate() const { return stopped_on_trial_gnorm_gate_; }
 
 private:
     // ── configuration ────────────────────────────────────────────────────────
@@ -70,6 +71,7 @@ private:
     double raw_gnorm_{1.0};
     double crit_conv_{1.0};
     bool   monitor_{false};
+    bool   stopped_on_trial_gnorm_gate_{false};
 
     // ── L-BFGS core: mirrors the Fortran LBFGS subroutine ───────────────────
     // Returns IFLAG: 1 = needs f/g evaluation, 0 = converged, <0 = error.
