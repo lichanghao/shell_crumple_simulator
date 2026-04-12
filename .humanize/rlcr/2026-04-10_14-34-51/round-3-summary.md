@@ -1,6 +1,7 @@
 Implemented a production-path fix for the AC-7 hidden-state blocker and replaced the ambiguous local-oracle dependency with committed archived fixtures.
 
 What changed:
+- Included the existing `.omx/` ignore entry in `.gitignore` so the RLCR gate could review a clean worktree.
 - Restored the canonical Fortran `minimize_free` / `minimize` outer-loop stop on `IFLAG=1` when the previous `GNORM < EPS` in [`src/core/lbfgs.cpp`](src/core/lbfgs.cpp). This is the behavior the pinned `7d3f77f` Fortran runtime actually takes on the archived compression case.
 - Added explicit bookkeeping in [`include/fce/lbfgs.hpp`](include/fce/lbfgs.hpp) so the solver reports when it exited through that trial-point `GNORM` gate.
 - Updated [`src/core/solver.cpp`](src/core/solver.cpp) to preserve the last evaluated assembly/`eta` on that Fortran-style early exit instead of forcing a post-exit reassembly the canonical runtime never performs.
