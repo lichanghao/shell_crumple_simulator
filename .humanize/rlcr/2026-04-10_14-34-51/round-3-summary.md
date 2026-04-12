@@ -21,6 +21,11 @@ Validation run this round:
   - GNORM relative error: `0.07258842380781792`
   - force relative errors: col1 `1.9696561849993883`, col2 `0.7141074833454957`, col3 `0.18183850697794815`
 
+## BitLesson Delta
+- Action: update
+- Lesson ID(s): BL-20260405-lbfgs-premature-exit
+- Notes: Commit-pinned `7d3f77f` Fortran evidence showed the archived compression runtime really exits `minimize_free` through the outer-loop stale-`GNORM` gate on `IFLAG=1`. The old lesson was too broad because it treated that path as a bug universally; this round narrows it so self-oracle cleanup and canonical executable-path parity are not conflated.
+
 ## Goal Tracker Update Request
 
 ### Requested Changes:
