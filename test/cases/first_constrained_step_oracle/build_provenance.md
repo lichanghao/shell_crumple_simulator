@@ -37,13 +37,14 @@ The replay reconstructed the first constrained-step evaluation state by:
 2. Restoring constrained DOFs from `step1_after_increment.dat` onto `step1_after_imperfection.dat`
    so the reconstructed state matched the `long(..., x0_BC, ...)` entry state in `minimize.f90`.
 3. Replacing the coordinate block in `nano_final_config.dat` with that reconstructed state.
-4. Running the Fortran helper programs based on
+4. Running the self-contained Fortran helper programs based on
    `test/cases/tools/dump_element_energy_oracle.f90` and
    `test/cases/tools/dump_first_step_full_oracle.f90` on that reconstructed-state case.
 
 Important: `element83_full_oracle.dat` is generated with the converged same-trace Fortran `eta`
-for each Gauss point before evaluating the stored prepared-bond `pe` surface. This avoids the
-archived-zero-eta semantics used by the broader archived constitutive fixtures.
+for each Gauss point before evaluating the stored prepared-bond `pe` surface. The helper computes
+the final `W_elem` and `f_elem` internally from committed source as well; it does not depend on any
+disposable `/tmp` binaries.
 
 ## Current Regression Contract
 

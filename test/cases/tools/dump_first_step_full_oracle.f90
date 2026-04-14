@@ -44,12 +44,32 @@ program dump_first_step_full_oracle
       logical, intent(out) :: flag_num_diff
     end subroutine principal
 
+    subroutine principal_(C_elem, curv0_elem, curvppal, vppal, flag_num_diff)
+      implicit real(8) (a - h, o - z)
+      implicit integer*4(i - n)
+      real(8), intent(in) :: C_elem(3), curv0_elem(3)
+      real(8), intent(out) :: curvppal(2), vppal(2, 2)
+      logical, intent(out) :: flag_num_diff
+    end subroutine principal_
+
     subroutine def_bonds_(C_elem, curvppal, vppal, A_norm, Ei, pe)
       implicit real(8) (a - h, o - z)
       implicit integer*4(i - n)
       real(8), intent(in) :: C_elem(3), curvppal(2), vppal(2, 2), A_norm(3), Ei(3, 2)
       real(8), intent(out) :: pe(6)
     end subroutine def_bonds_
+
+    subroutine def_bonds(C_elem, curvppal, vppal, dcurvppaldC, dcurvppaldk, &
+                         dvppaldC, dvppaldk, A_norm, Ei, pe, dpedC, dpedk)
+      use data_vector3
+      implicit real(8) (a - h, o - z)
+      implicit integer*4(i - n)
+      real(8), intent(in) :: C_elem(3), curvppal(2), vppal(2, 2), A_norm(3), Ei(3, 2)
+      type(vector3), intent(in) :: dcurvppaldC(2), dcurvppaldk(2)
+      type(vector3), intent(in) :: dvppaldC(2, 2), dvppaldk(2, 2)
+      real(8), intent(out) :: pe(6)
+      type(vector3), intent(out) :: dpedC(6), dpedk(6)
+    end subroutine def_bonds
 
     subroutine newton_inner(C_elem, curvppal, vppal, mat1, x, W, dWdp, crit, n, maxn, fail_mode)
       use data_mat
@@ -83,6 +103,7 @@ program dump_first_step_full_oracle
   type(vector3) :: dC(12, 3), dcurv(12, 3), dnorm(12, 3)
   type(vector3) :: dcurvppaldC(2), dcurvppaldk(2)
   type(vector3) :: dvppaldC(2, 2), dvppaldk(2, 2)
+  type(vector3) :: dpedC(6), dpedk(6)
 
   integer, allocatable :: neigh_vert(:, :)
   real(8), allocatable :: x0(:, :)
@@ -92,12 +113,13 @@ program dump_first_step_full_oracle
 
   real(8) :: xneigh(12, 3), DN(12, 2), DDN(12, 3)
   real(8) :: C_elem(3), curv0_elem(3), xnor_elem(3)
-  real(8) :: curvppal(2), vppal(2, 2)
-  real(8) :: A_norm(3), Ei(3, 2), pe(6)
+  real(8) :: curvppal(2), vppal(2, 2), C_elem_(3), curv0_elem_(3), curvppal_(2), vppal_(2, 2)
+  real(8) :: A_norm(3), Ei(3, 2), pe(6), pe_(6)
   real(8) :: eta_final(2), W, dWdeta(2), ddWdeta(3), dW(6)
-  real(8) :: f_elem(12, 3), W_elem
+  real(8) :: f_elem(12, 3), W_elem, W_, dW_(6), S_n(3), S_m(3)
   logical :: flag_num_diff
-  real(8), parameter :: crit = 1.0d-8
+  real(8), parameter :: crit = 1.0d-8, h = 1.0d-8
+  integer :: ij
 
   call get_command_argument(1, case_dir)
   call get_command_argument(2, out_path)
@@ -150,6 +172,33 @@ program dump_first_step_full_oracle
     end do
     call def_bonds_(C_elem, curvppal, vppal, A_norm, Ei, pe)
 
+    if (flag_num_diff) then
+      call My_Hyper_Pot(mat1, pe, W, dW)
+      do ij = 1, 3
+        C_elem_ = C_elem
+        curv0_elem_ = curv0_elem
+        C_elem_(ij) = C_elem_(ij) + h
+        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_num_diff)
+        call def_bonds_(C_elem_, curvppal_, vppal_, A_norm, Ei, pe_)
+        call My_Hyper_Pot(mat1, pe_, W_, dW_)
+        S_n(ij) = (W_ - W) / h
+      end do
+      do ij = 1, 3
+        C_elem_ = C_elem
+        curv0_elem_ = curv0_elem
+        C_elem_(ij) = C_elem_(ij) + h
+        call principal_(C_elem_, curv0_elem_, curvppal_, vppal_, flag_num_diff)
+        call def_bonds_(C_elem_, curvppal_, vppal_, A_norm, Ei, pe_)
+        call My_Hyper_Pot(mat1, pe_, W_, dW_)
+        S_m(ij) = (W_ - W) / h
+      end do
+    else
+      call def_bonds(C_elem, curvppal, vppal, dcurvppaldC, dcurvppaldk, &
+                     dvppaldC, dvppaldk, A_norm, Ei, pe, dpedC, dpedk)
+      call My_Hyper_Pot(mat1, pe, W, dW)
+      call My_Stresses(dW, dpedC, dpedk, S_n, S_m)
+    end if
+
     write(15, "(3ES32.17E3)") C_elem
     write(15, "(3ES32.17E3)") curv0_elem
     write(15, "(2ES32.17E3)") curvppal
@@ -161,32 +210,20 @@ program dump_first_step_full_oracle
     write(15, "(2ES32.17E3)") eta_final
     write(15, "(ES32.17E3)") W
     write(15, "(3ES32.17E3)") ddWdeta
+
+    do ij = 1, 3
+      f_elem = f_elem + (S_n(ij)*dC(:, :)%val(ij) + S_m(ij)*dcurv(:, :)%val(ij)) * weight(igauss)
+    end do
+    W_elem = W_elem + W * weight(igauss)
   end do
 
-  call write_element_energy_fixture(trim(case_dir), trim(out_path))
+  write(15, "(ES32.17E3)") W_elem
+  do inode = 1, 12
+    write(15, "(3ES32.17E3)") f_elem(inode, :)
+  end do
+  close(15)
 
 contains
-
-  subroutine write_element_energy_fixture(case_dir, path)
-    character(len=*), intent(in) :: case_dir, path
-    character(len=512) :: energy_dir
-    integer :: ios, jj
-    real(8) :: row(3)
-
-    energy_dir = "/tmp/fce-round4-energy-helper"
-    call execute_command_line("mkdir -p " // trim(energy_dir))
-    call execute_command_line("/tmp/dump_element_energy_oracle_round4 " // trim(case_dir) // " " // trim(energy_dir))
-
-    open(unit=16, file=trim(energy_dir) // "/archived_compression_np1/case_01.dat", status="old", action="read")
-    read(16, *) jj, jj
-    read(16, *) W_elem
-    write(15, "(ES32.17E3)") W_elem
-    do jj = 1, 12
-      read(16, *) row(1), row(2), row(3)
-      write(15, "(3ES32.17E3)") row
-    end do
-    close(16)
-  end subroutine write_element_energy_fixture
 
   subroutine read_dims(path, numele, numnods, ngauss)
     character(len=*), intent(in) :: path
@@ -292,5 +329,45 @@ contains
     end do
 900 stop "label not found"
   end subroutine skip_to_label
+
+  subroutine My_Hyper_Pot(mat1, pe, W, dW)
+    use data_mat
+    implicit real(8) (a - h, o - z)
+    implicit integer*4(i - n)
+    type(material), intent(in) :: mat1
+    real(8), intent(in) :: pe(6)
+    real(8), intent(out) :: W, dW(6)
+    interface
+      subroutine Morse(mat1, pe, W, dW)
+        use data_mat
+        implicit real(8) (a - h, o - z)
+        implicit integer*4(i - n)
+        type(material), intent(in) :: mat1
+        real(8), intent(in) :: pe(6)
+        real(8), intent(out) :: W, dW(6)
+      end subroutine Morse
+    end interface
+    if (mat1%nCode_Pot == 1) then
+      call Morse(mat1, pe, W, dW)
+    else
+      stop "My_Hyper_Pot: only Morse supported"
+    end if
+  end subroutine My_Hyper_Pot
+
+  subroutine My_Stresses(dW, dpedC, dpedk, S_n, S_m)
+    use data_vector3
+    implicit real(8) (a - h, o - z)
+    implicit integer*4(i - n)
+    real(8), intent(in) :: dW(6)
+    type(vector3), intent(in) :: dpedC(6), dpedk(6)
+    real(8), intent(out) :: S_n(3), S_m(3)
+    integer :: i
+    S_n = 0.d0
+    S_m = 0.d0
+    do i = 1, 6
+      S_n = S_n + dW(i) * dpedC(i)%val
+      S_m = S_m + dW(i) * dpedk(i)%val
+    end do
+  end subroutine My_Stresses
 
 end program dump_first_step_full_oracle
