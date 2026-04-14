@@ -889,6 +889,20 @@ TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTra
     }
 }
 
+TEST_F(E2ECompression, CrunchItStepOneVtuSnapshotMatchesArchivedOracle) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
+
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
+    expect_vtu_matches_archive(temp_case_dir_ / "mesh_config_0001.vtu",
+                               kCaseDir / "mesh_config_0001.vtu",
+                               dims,
+                               1e-6);
+}
+
 TEST(CompressionCaseFiles, ArchivedStepOneVtuMatchesArchivedEnergyAndReactionRows) {
     const auto input = fce::load_simulator_input(kCaseDir.string());
     auto state = replay_state_from_oracle_vtu(kCaseDir / "mesh_config_0001.vtu", input);
