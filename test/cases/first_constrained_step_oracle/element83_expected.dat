@@ -1,0 +1,11 @@
+# Element 83 first constrained-step oracle from the temporary same-trace Fortran replay
+# Header: element(1-based) ngauss
+83 2
+# W_elem
+1.51680195367486864E-01
+# eta(gauss 1)
+1.7059377382830062E-04 -1.3871993792757202E-04
+# eta(gauss 2)
+1.1767640905118179E-03 -1.5551411794653993E-03
+# flag_num_diff for gauss 1 and 2
+0 0

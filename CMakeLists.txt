@@ -115,6 +115,7 @@ gtest_discover_tests(unit_tests)
 
 add_executable(integration_tests
   test/support/oracle_compare.cpp
+  test/integration/test_first_constrained_step_oracle.cpp
   test/integration/test_oracle_roundtrip.cpp
   test/integration/test_prepro_oracle.cpp
   test/integration/test_e2e_compression.cpp
