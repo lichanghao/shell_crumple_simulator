@@ -9,6 +9,8 @@ authoritative Fortran replay so unit tests can exercise the kernel directly with
 `element83_full_oracle.dat` archives the fuller analytical Fortran surface on that same authoritative state:
 `C_elem`, `curv0_elem`, `curvppal`, `vppal`, prepared `pe`, converged `eta`, `W`, `ddWdeta`,
 element `W_elem`, and `f_elem`.
+`reconstructed_case/` archives the reconstructed simulator inputs used to regenerate
+`element83_full_oracle.dat` from committed source without relying on ad-hoc `/tmp` state.
 
 - Element: `83` (1-based)
 - Gauss points: `2`
@@ -36,10 +38,11 @@ The replay reconstructed the first constrained-step evaluation state by:
    `step1_after_imperfection.dat` on load step 1.
 2. Restoring constrained DOFs from `step1_after_increment.dat` onto `step1_after_imperfection.dat`
    so the reconstructed state matched the `long(..., x0_BC, ...)` entry state in `minimize.f90`.
-3. Replacing the coordinate block in `nano_final_config.dat` with that reconstructed state.
+3. Replacing the coordinate block in `nano_final_config.dat` with that reconstructed state and
+   archiving the resulting helper inputs under `reconstructed_case/`.
 4. Running the self-contained Fortran helper programs based on
    `test/cases/tools/dump_element_energy_oracle.f90` and
-   `test/cases/tools/dump_first_step_full_oracle.f90` on that reconstructed-state case.
+   `test/cases/tools/dump_first_step_full_oracle.f90` on `reconstructed_case/`.
 
 Important: `element83_full_oracle.dat` is generated with the converged same-trace Fortran `eta`
 for each Gauss point before evaluating the stored prepared-bond `pe` surface. The helper computes
@@ -53,7 +56,46 @@ disposable `/tmp` binaries.
   Fortran oracle.
 - `test/unit/test_first_constrained_step_oracle.cpp` reads `element83_state.dat`,
   `element83_expected.dat`, and `element83_full_oracle.dat` directly and keeps a standalone
-  exact-state red gate on the archived first-step kernel surface.
+  exact-state gate on the archived first-step kernel surface.
 
-Both tests are expected to stay red until the analytical element kernel matches the same-trace
-Fortran replay.
+Current measured state:
+
+- `FirstConstrainedStepOracle.Element83ReplayMatchesCommittedFortranOracle` is green.
+- `FirstConstrainedStepOracle.Element83UnitFixtureMatchesCommittedFortranOracle` is green.
+- The remaining analytical red gates are the broader archived constitutive/kernel regressions:
+  `ElementState.MatchesArchivedCompressionSimulatorOracleFixtures`,
+  `ElementEnergy.MatchesArchivedCompressionSimulatorOracleFixtures`,
+  and `ElementEnergy.FElemMatchesFortranOracle`.
+
+## Reproduction
+
+From the C++ repository root, rebuild the full first-step oracle from committed inputs with:
+
+```bash
+mkdir -p /tmp/first_step_mods /tmp/first_step_obj
+gfortran -std=legacy -O0 -J /tmp/first_step_mods -c \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/headers.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/Taylor.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/BSpline.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/gauss.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/geometry.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/principal.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/exponential.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/brenner.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/brenner2.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/morse.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/mm3.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/Hyper_pot_inner_alg.f90 \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion/newton_inner.f90 \
+  test/cases/tools/dump_first_step_full_oracle.f90
+mv ./*.o /tmp/first_step_obj/
+gfortran -std=legacy -O0 -J /tmp/first_step_mods -o /tmp/dump_first_step_full_oracle \
+  /tmp/first_step_obj/headers.o /tmp/first_step_obj/Taylor.o /tmp/first_step_obj/BSpline.o \
+  /tmp/first_step_obj/gauss.o /tmp/first_step_obj/geometry.o /tmp/first_step_obj/principal.o \
+  /tmp/first_step_obj/exponential.o /tmp/first_step_obj/brenner.o /tmp/first_step_obj/brenner2.o \
+  /tmp/first_step_obj/morse.o /tmp/first_step_obj/mm3.o /tmp/first_step_obj/Hyper_pot_inner_alg.o \
+  /tmp/first_step_obj/newton_inner.o /tmp/first_step_obj/dump_first_step_full_oracle.o
+/tmp/dump_first_step_full_oracle \
+  test/cases/first_constrained_step_oracle/reconstructed_case \
+  test/cases/first_constrained_step_oracle/element83_full_oracle.dat
+```
