@@ -15,29 +15,33 @@
 #include <string>
 #include <vector>
 
-#ifndef ORACLE_DIR
-#define ORACLE_DIR "test/cases"
-#endif
-
-#ifndef CRUNCH_IT_BIN
-#define CRUNCH_IT_BIN "build/crunch_it"
-#endif
-
 namespace {
 
 namespace fs = std::filesystem;
 
+#if defined(ORACLE_DIR)
+constexpr const char* kOracleDir = ORACLE_DIR;
+#else
+constexpr const char* kOracleDir = "test/cases";
+#endif
+
+#if defined(CRUNCH_IT_BIN)
+constexpr const char* kCrunchItBinPath = CRUNCH_IT_BIN;
+#else
+constexpr const char* kCrunchItBinPath = "build/crunch_it";
+#endif
+
 const fs::path kCaseDir =
-    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+    fs::path(kOracleDir) / "graphene_compression_simulator" / "np1";
 const fs::path kSelfContactCaseDir =
-    fs::path(ORACLE_DIR) / "graphene_self_contact" / "prepro_run";
+    fs::path(kOracleDir) / "graphene_self_contact" / "prepro_run";
 const fs::path kXmlValidatorScript =
-    fs::path(ORACLE_DIR).parent_path() / "support" / "validate_vtk_xml.py";
+    fs::path(kOracleDir).parent_path() / "support" / "validate_vtk_xml.py";
 const fs::path kFortranTraceFixture =
-    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_fortran.dat";
+    fs::path(kOracleDir) / "graphene_compression_simulator" / "imperfection_trace_fortran.dat";
 const fs::path kPostMinimizeFreeFixture =
-    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "post_minimize_free_coords.dat";
-const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
+    fs::path(kOracleDir) / "graphene_compression_simulator" / "post_minimize_free_coords.dat";
+const fs::path kCrunchItBin = fs::path(kCrunchItBinPath);
 
 struct DataRow {
     double load{0.0};

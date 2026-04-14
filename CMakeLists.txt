@@ -5,6 +5,14 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Some local environments inject legacy relative-path test macros through
+# CMAKE_CXX_FLAGS. They override the target-specific absolute definitions we
+# set for the test binaries and break ctest execution from the build tree.
+foreach(_legacy_def "-DORACLE_DIR=\\\"test/cases\\\"" "-DCRUNCH_IT_BIN=\\\"build/crunch_it\\\"")
+  string(REPLACE "${_legacy_def}" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+endforeach()
+string(STRIP "${CMAKE_CXX_FLAGS}" CMAKE_CXX_FLAGS)
+
 # Build type default
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
