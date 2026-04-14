@@ -18,7 +18,7 @@ This document records the current C++ translation status against the canonical F
 | Core data types and `nano_*.dat` I/O | translated and verified | Public types live in `include/fce/types.hpp`; Fortran-format readers/writers live in `src/core/io.cpp`. |
 | Preprocessor mesh/ghost/B-spline/reference config path | translated and verified | Compression and cyclic preprocessor oracles are exercised by integration tests. |
 | Preprocessor-side `nvdw=1` preparation | translated and verified | Single-sheet self-contact and bilayer-twist local-density cases are archived and tested. |
-| Constitutive kernels and archived element-state coverage | translated and verified | Brenner, inner Newton, principal, exponential, and archived element-state fixtures are present. |
+| Constitutive kernels and archived element-state coverage | translated and partially verified | Brenner, principal, and exponential fixtures are present, but the archived `ElementState` / `ElementEnergy` kernel gates are still red. |
 | Runtime assembly path | translated and partially verified | Archived compression VTU snapshots reproduce assembly energy, but the live executable path still diverges later in the solve. |
 | Runtime VTU/PVD output | translated and partially verified | XML parseability and archived compression field checks are covered; executable-path real `nvdw=1` oracle coverage is still missing. |
 | Runtime vdW/self-contact assembly | not yet translated | Preprocessor-side support exists, but simulator-side `vdw_modules.f90` behavior is still pending. |
@@ -36,7 +36,7 @@ This document records the current C++ translation status against the canonical F
 | B-spline basis | `src/core/bspline.cpp` | translated |
 | Reference deformation gradient / Jacobian | `src/core/reference_config.cpp` | translated |
 | Boundary-condition setup | `src/core/load_pre.cpp`, `src/core/load_controller.cpp` | partial |
-| Brenner and inner constitutive logic | `src/core/constitutive.cpp`, `src/core/element_state.cpp`, `src/core/element_energy.cpp` | translated for the current oracle-backed scope |
+| Brenner and inner constitutive logic | `src/core/constitutive.cpp`, `src/core/element_state.cpp`, `src/core/element_energy.cpp` | partial, archived kernel parity still open |
 | Principal/exponential helpers | `src/core/principal.cpp`, `src/core/exponential.cpp`, `src/core/taylor.cpp` | translated |
 | L-BFGS runtime minimization | `src/core/lbfgs.cpp` | partial, still under archived runtime parity work |
 | Runtime output | `src/core/runtime_output.cpp` | partial |

@@ -4,6 +4,8 @@
 
 `element83_expected.dat` captures the temporary same-trace Fortran oracle used to diagnose the
 Round 0 / Round 1 AC-7 blocker on the very first constrained-step energy evaluation.
+`element83_state.dat` archives the reconstructed 12-node element-83 patch coordinates for that same
+kernel entry state so unit tests can exercise the kernel directly without rerunning `crunch_it`.
 
 - Element: `83` (1-based)
 - Gauss points: `2`
@@ -30,7 +32,11 @@ The replay reconstructed the first constrained-step evaluation state by:
 
 ## Current Regression Contract
 
-The integration regression uses the committed archived compression inputs plus the committed replay
-trace to reconstruct the comparable first constrained-step entry state from the current C++
-runtime, then compares the translated kernel against this committed Fortran oracle. The test is
-expected to stay red until the analytical element kernel matches the same-trace Fortran replay.
+- `test/integration/test_first_constrained_step_oracle.cpp` reconstructs the first constrained-step
+  entry state from committed replay inputs and compares the translated kernel against the committed
+  Fortran oracle.
+- `test/unit/test_first_constrained_step_oracle.cpp` reads `element83_state.dat` directly and keeps
+  a standalone exact-state red gate on the committed `eta` / `W_elem` mismatch.
+
+Both tests are expected to stay red until the analytical element kernel matches the same-trace
+Fortran replay.

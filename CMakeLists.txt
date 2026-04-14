@@ -95,6 +95,7 @@ add_executable(unit_tests
   test/unit/test_element_energy.cpp
   test/unit/test_element_state.cpp
   test/unit/test_exponential.cpp
+  test/unit/test_first_constrained_step_oracle.cpp
   test/unit/test_geometry.cpp
   test/unit/test_ghost_nodes.cpp
   test/unit/test_io.cpp
