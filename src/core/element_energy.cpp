@@ -116,13 +116,11 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
                 A_norm,
                 Ei);
 
-            if (!nW_hat) {
-                // No inner relaxation: compute W and dW from outer potential
-                const OuterPotentialOutput outer = evaluate_outer_potential(mat, bonds.pe);
-                W  = outer.W;
-                dW = outer.dW;
-            }
-            // If nW_hat: W and dW already set from solve_inner_newton output above
+            // The canonical ener_elem.f90 path always recomputes Hyper_Pot on the
+            // final relaxed bond state before assembling analytical stresses.
+            const OuterPotentialOutput outer = evaluate_outer_potential(mat, bonds.pe);
+            W  = outer.W;
+            dW = outer.dW;
 
             for (int i = 0; i < 6; ++i) {
                 for (int j = 0; j < 3; ++j) {
