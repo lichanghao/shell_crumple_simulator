@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -54,6 +55,18 @@ NeighborCoords12 gather_neighbor_patch(const Mesh& mesh,
     }
 
     return xneigh;
+}
+
+std::string format_patch_coords(const NeighborCoords12& xneigh) {
+    std::ostringstream out;
+    out << std::scientific << std::setprecision(16);
+    for (int inode = 0; inode < 12; ++inode) {
+        out << " [" << inode << "]"
+            << " x=" << xneigh[inode][0]
+            << " y=" << xneigh[inode][1]
+            << " z=" << xneigh[inode][2];
+    }
+    return out.str();
 }
 
 std::vector<double> flatten_eta(const EtaField& eta, const int numele, const int ngauss) {
@@ -236,16 +249,26 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     for (int ielem = element_begin; ielem < element_end; ++ielem) {
         const auto xneigh = gather_neighbor_patch(input.mesh, coords_with_ghosts, ielem);
         const auto& eta0 = state.eta.at(static_cast<std::size_t>(ielem));
-        const auto elem = compute_element_energy(
-            xneigh,
-            input.ref_config.at(static_cast<std::size_t>(ielem)).F0,
-            Voigt3{0.0, 0.0, 0.0},
-            input.gauss,
-            input.general.mat,
-            input.general.nW_hat,
-            input.general.crit_local,
-            kDefaultInnerMaxIter,
-            eta0);
+        const auto elem = [&]() {
+            try {
+                return compute_element_energy(
+                    xneigh,
+                    input.ref_config.at(static_cast<std::size_t>(ielem)).F0,
+                    Voigt3{0.0, 0.0, 0.0},
+                    input.gauss,
+                    input.general.mat,
+                    input.general.nW_hat,
+                    input.general.crit_local,
+                    kDefaultInnerMaxIter,
+                    eta0);
+            } catch (const std::exception& ex) {
+                std::ostringstream msg;
+                msg << "assemble_energy_forces failed at element " << ielem
+                    << " with error: " << ex.what()
+                    << " patch:" << format_patch_coords(xneigh);
+                throw std::runtime_error(msg.str());
+            }
+        }();
         state.eta.at(static_cast<std::size_t>(ielem)) = elem.eta;
         result.eta_updates.at(static_cast<std::size_t>(ielem)) = elem.eta;
 
