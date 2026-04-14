@@ -154,11 +154,11 @@ int LbfgsSolver::minimize(std::vector<double>& x,
         }
 
         // iflag == 1: x was updated by MCSRCH, need new f/g evaluation.
-        // The canonical Fortran outer loop still checks GNORM here before the
-        // trial point is re-evaluated. That stale-looking stop is what leaves
-        // minimize_free on the first accepted trial in the archived runtime.
+        // The caller-side reverse-communication gate in minimize.f90 and
+        // minimize_free.f90 compares the stale GNORM argument returned by
+        // LBFGS, which is actually CRIT_CONV, not the raw ||g||.
         icall++;
-        if (raw_gnorm_ < eps_) {
+        if (crit_conv_ < eps_) {
             stopped_on_trial_gnorm_gate_ = true;
             return 0;
         }

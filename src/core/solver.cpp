@@ -41,6 +41,71 @@ bool lbfgs_monitor_enabled() {
              value == "no" || value == "off");
 }
 
+std::string trace_dump_dir() {
+    const char* raw = std::getenv("FCE_TRACE_COORD_DUMPS");
+    if (raw == nullptr) {
+        return {};
+    }
+    return std::string(raw);
+}
+
+void write_coord_dump_if_enabled(const RuntimeState& state,
+                                 const std::string& stage,
+                                 const int iload,
+                                 const MpiEnv& mpi) {
+    const std::string dir = trace_dump_dir();
+    if (dir.empty() || !mpi.is_root()) {
+        return;
+    }
+    if (iload != 1) {
+        return;
+    }
+
+    const std::string path = dir + "/step" + std::to_string(iload) + "_" + stage + ".dat";
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+
+    out << std::uppercase << std::scientific << std::setprecision(16);
+    for (std::size_t inode = 0; inode < state.coords.size(); ++inode) {
+        const auto& p = state.coords[inode];
+        out << std::setw(8) << inode + 1
+            << std::setw(24) << p[0]
+            << std::setw(24) << p[1]
+            << std::setw(24) << p[2]
+            << "\n";
+    }
+}
+
+void write_eta_dump_if_enabled(const RuntimeState& state,
+                               const std::string& stage,
+                               const int iload,
+                               const MpiEnv& mpi) {
+    const std::string dir = trace_dump_dir();
+    if (dir.empty() || !mpi.is_root()) {
+        return;
+    }
+
+    const std::string path = dir + "/step" + std::to_string(iload) + "_" + stage + "_eta.dat";
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+
+    out << std::uppercase << std::scientific << std::setprecision(16);
+    for (std::size_t ielem = 0; ielem < state.eta.size(); ++ielem) {
+        const auto& elem_eta = state.eta[ielem];
+        for (std::size_t igauss = 0; igauss < elem_eta.size(); ++igauss) {
+            out << std::setw(8) << ielem + 1
+                << std::setw(8) << igauss + 1
+                << std::setw(24) << elem_eta[igauss][0]
+                << std::setw(24) << elem_eta[igauss][1]
+                << "\n";
+        }
+    }
+}
+
 // ─── XNORM0 computation ───────────────────────────────────────────────────────
 // Mirrors Fortran minimize.f90 lines 43-46:
 //   dx1 = maxval(x0(1:3*numnods:3)) - minval(x0(1:3*numnods:3))
@@ -409,6 +474,7 @@ void pasapas(const SimulatorInput& input,
 
     // ── Step 0: free minimisation (mirrors Fortran pasapas.f90 lines 55-62) ───
     auto step0 = minimize_free(input, state, mpi, eps);
+    write_eta_dump_if_enabled(state, "post_free", 0, mpi);
 
     // Mirrors Fortran: write(*,*) 'enforce the boundary change' then x0_BC=x0(mdofBC).
     if (mpi.is_root()) {
@@ -458,10 +524,14 @@ void pasapas(const SimulatorInput& input,
 
         // Apply load increment (moves BC nodes, updates coords).
         load_ctrl.apply_increment(iload, state.coords);
+        write_coord_dump_if_enabled(state, "after_increment", iload, mpi);
         apply_imperfections(input, state, iload);
+        write_coord_dump_if_enabled(state, "after_imperfection", iload, mpi);
 
         // Constrained minimisation.
         auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps);
+        write_coord_dump_if_enabled(state, "after_minimize", iload, mpi);
+        write_eta_dump_if_enabled(state, "after_minimize", iload, mpi);
 
         // Reuse the last converged assembly, matching the Fortran runtime path.
         const auto forces_real = real_node_forces(min_res.assembly, input.mesh.numnods);
