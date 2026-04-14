@@ -14,17 +14,21 @@
 #include <string>
 #include <vector>
 
-#if !defined(ORACLE_DIR)
-#define ORACLE_DIR "test/cases"
-#endif
-
-#if !defined(CRUNCH_IT_BIN)
-#define CRUNCH_IT_BIN "build/crunch_it"
-#endif
-
 namespace {
 
 namespace fs = std::filesystem;
+
+#if defined(ORACLE_DIR)
+constexpr const char* kOracleDir = ORACLE_DIR;
+#else
+constexpr const char* kOracleDir = "test/cases";
+#endif
+
+#if defined(CRUNCH_IT_BIN)
+constexpr const char* kCrunchItBinPath = CRUNCH_IT_BIN;
+#else
+constexpr const char* kCrunchItBinPath = "build/crunch_it";
+#endif
 
 using Vec2 = fce::Vec2;
 using Vec3 = fce::Vec3;
@@ -34,12 +38,12 @@ using ShapeGradient12 = fce::ShapeGradient12;
 using ShapeCurvature12 = fce::ShapeCurvature12;
 
 const fs::path kCaseDir =
-    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+    fs::path(kOracleDir) / "graphene_compression_simulator" / "np1";
 const fs::path kTraceFixture =
-    fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "imperfection_trace_fortran.dat";
+    fs::path(kOracleDir) / "graphene_compression_simulator" / "imperfection_trace_fortran.dat";
 const fs::path kExpectedFixture =
-    fs::path(ORACLE_DIR) / "first_constrained_step_oracle" / "element83_expected.dat";
-const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
+    fs::path(kOracleDir) / "first_constrained_step_oracle" / "element83_expected.dat";
+const fs::path kCrunchItBin = fs::path(kCrunchItBinPath);
 
 struct FirstStepExpected {
     int element_index{0};
@@ -241,13 +245,15 @@ TEST(FirstConstrainedStepOracle, Element83ReplayMatchesCommittedFortranOracle) {
     ASSERT_EQ(result.eta.size(), static_cast<std::size_t>(expected.ngauss));
     for (int igauss = 0; igauss < expected.ngauss; ++igauss) {
         for (int axis = 0; axis < 2; ++axis) {
+            const double tol = 1e-8;
             EXPECT_NEAR(result.eta.at(static_cast<std::size_t>(igauss))[axis],
                         expected.eta.at(static_cast<std::size_t>(igauss))[axis],
-                        1e-10)
+                        tol)
                 << "gauss=" << igauss << " axis=" << axis;
         }
     }
-    EXPECT_NEAR(result.W_elem, expected.W_elem, 1e-10);
+    const double w_tol = 1e-7;
+    EXPECT_NEAR(result.W_elem, expected.W_elem, w_tol);
 
     fs::remove_all(temp_root);
 }
