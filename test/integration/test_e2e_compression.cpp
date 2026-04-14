@@ -1,4 +1,5 @@
 #include "fce/io.hpp"
+#include "fce/load_controller.hpp"
 #include "fce/runtime_output.hpp"
 #include "fce/simulator.hpp"
 
@@ -886,6 +887,38 @@ TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTra
         EXPECT_LE(relative_error(actual_force.front().values[col], oracle_force.front().values[col], 1e-12), 1e-3)
             << "step1 force col " << col;
     }
+}
+
+TEST(CompressionCaseFiles, ArchivedStepOneVtuMatchesArchivedEnergyAndReactionRows) {
+    const auto input = fce::load_simulator_input(kCaseDir.string());
+    auto state = replay_state_from_oracle_vtu(kCaseDir / "mesh_config_0001.vtu", input);
+
+    const auto assembly = fce::assemble_energy_forces(
+        input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
+
+    const auto oracle_energy = read_positive_load_rows(kCaseDir / "energy.dat", /*skip_header=*/true);
+    const auto oracle_force = read_positive_load_rows(kCaseDir / "force.dat", /*skip_header=*/false);
+    ASSERT_FALSE(oracle_energy.empty());
+    ASSERT_FALSE(oracle_force.empty());
+
+    EXPECT_LE(relative_error(assembly.total_energy, oracle_energy.front().values[1], 1e-12), 1e-4)
+        << "archived step-one VTU vs energy.dat total energy";
+
+    std::vector<double> forces_real(
+        assembly.force.begin(),
+        assembly.force.begin() + 3 * input.mesh.numnods);
+    fce::LoadController load_ctrl(input.bcs);
+    load_ctrl.init(state.coords);
+
+    double reaction1 = 0.0;
+    double reaction2 = 0.0;
+    load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+
+    ASSERT_GE(oracle_force.front().values.size(), 4U);
+    EXPECT_LE(relative_error(reaction1, oracle_force.front().values[2], 1e-12), 1e-3)
+        << "archived step-one VTU vs force.dat reaction1";
+    EXPECT_LE(relative_error(reaction2, oracle_force.front().values[3], 1e-12), 1e-3)
+        << "archived step-one VTU vs force.dat reaction2";
 }
 
 TEST_F(E2ECompression, CrunchItLbfgsMonitorIsOptIn) {
