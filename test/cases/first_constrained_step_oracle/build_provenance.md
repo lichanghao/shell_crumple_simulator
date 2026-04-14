@@ -6,6 +6,9 @@
 Round 0 / Round 1 AC-7 blocker on the very first constrained-step energy evaluation.
 `element83_state.dat` archives the reconstructed 12-node element-83 patch coordinates for that same
 kernel entry state so unit tests can exercise the kernel directly without rerunning `crunch_it`.
+`element83_full_oracle.dat` archives the fuller analytical Fortran surface on that same state:
+`C_elem`, `curv0_elem`, `curvppal`, `vppal`, prepared `pe`, converged `eta`, `W`, `ddWdeta`,
+element `W_elem`, and `f_elem`.
 
 - Element: `83` (1-based)
 - Gauss points: `2`
@@ -14,6 +17,10 @@ kernel entry state so unit tests can exercise the kernel directly without rerunn
   - `eta(gauss 1) = [1.7059377382830062e-04, -1.3871993792757202e-04]`
   - `eta(gauss 2) = [1.1767640905118179e-03, -1.5551411794653993e-03]`
   - `flag_num_diff = false` at both Gauss points
+- Full-surface values:
+  - Per-Gauss `C_elem`, `curv0_elem`, `curvppal`, `vppal`, prepared `pe`, converged `eta`,
+    `W`, and `ddWdeta`
+  - Element-level `W_elem` and `f_elem`
 
 ## Source
 
@@ -35,8 +42,9 @@ The replay reconstructed the first constrained-step evaluation state by:
 - `test/integration/test_first_constrained_step_oracle.cpp` reconstructs the first constrained-step
   entry state from committed replay inputs and compares the translated kernel against the committed
   Fortran oracle.
-- `test/unit/test_first_constrained_step_oracle.cpp` reads `element83_state.dat` directly and keeps
-  a standalone exact-state red gate on the committed `eta` / `W_elem` mismatch.
+- `test/unit/test_first_constrained_step_oracle.cpp` reads `element83_state.dat`,
+  `element83_expected.dat`, and `element83_full_oracle.dat` directly and keeps a standalone
+  exact-state red gate on the archived first-step kernel surface.
 
 Both tests are expected to stay red until the analytical element kernel matches the same-trace
 Fortran replay.
