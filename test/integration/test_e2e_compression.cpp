@@ -921,6 +921,43 @@ TEST(CompressionCaseFiles, ArchivedStepOneVtuMatchesArchivedEnergyAndReactionRow
         << "archived step-one VTU vs force.dat reaction2";
 }
 
+TEST_F(E2ECompression, GeneratedStepOneVtuMatchesGeneratedEnergyAndReactionRows) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
+
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    auto state = replay_state_from_oracle_vtu(temp_case_dir_ / "mesh_config_0001.vtu", input);
+    const auto assembly = fce::assemble_energy_forces(
+        input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
+
+    const auto actual_energy = read_positive_load_rows(temp_case_dir_ / "energy.dat", /*skip_header=*/true);
+    const auto actual_force = read_positive_load_rows(temp_case_dir_ / "force.dat", /*skip_header=*/false);
+    ASSERT_FALSE(actual_energy.empty());
+    ASSERT_FALSE(actual_force.empty());
+
+    EXPECT_LE(relative_error(assembly.total_energy, actual_energy.front().values[1], 1e-12), 1e-4)
+        << "generated step-one VTU vs generated energy.dat total energy";
+
+    std::vector<double> forces_real(
+        assembly.force.begin(),
+        assembly.force.begin() + 3 * input.mesh.numnods);
+    fce::LoadController load_ctrl(input.bcs);
+    load_ctrl.init(state.coords);
+
+    double reaction1 = 0.0;
+    double reaction2 = 0.0;
+    load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+
+    ASSERT_GE(actual_force.front().values.size(), 4U);
+    EXPECT_LE(relative_error(reaction1, actual_force.front().values[2], 1e-12), 1e-3)
+        << "generated step-one VTU vs generated force.dat reaction1";
+    EXPECT_LE(relative_error(reaction2, actual_force.front().values[3], 1e-12), 1e-3)
+        << "generated step-one VTU vs generated force.dat reaction2";
+}
+
 TEST_F(E2ECompression, CrunchItLbfgsMonitorIsOptIn) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
