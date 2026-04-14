@@ -38,10 +38,6 @@ const fs::path kFortranTraceFixture =
 const fs::path kPostMinimizeFreeFixture =
     fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "post_minimize_free_coords.dat";
 const fs::path kCrunchItBin = fs::path(CRUNCH_IT_BIN);
-constexpr std::array<double, 6> kArchivedStep1EnergyRow{
-    2.0e-2, 5.7210528e-5, 5.7210528e-5, 0.0, 0.0, 9.63126754e-6};
-constexpr std::array<double, 4> kArchivedStep1ForceRow{
-    2.0e-2, 5.7211e-5, -4.2481e-5, 8.4982e-5};
 
 struct DataRow {
     double load{0.0};
@@ -868,18 +864,22 @@ TEST_F(E2ECompression, CrunchItStepOneMatchesArchivedFortranOracleWithFortranTra
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
 
     const auto actual_energy = read_positive_load_rows(temp_case_dir_ / "energy.dat", /*skip_header=*/true);
+    const auto oracle_energy = read_positive_load_rows(kCaseDir / "energy.dat", /*skip_header=*/true);
     ASSERT_FALSE(actual_energy.empty());
+    ASSERT_FALSE(oracle_energy.empty());
     ASSERT_GE(actual_energy.front().values.size(), 2U);
-    ASSERT_GE(actual_energy.front().values.size(), kArchivedStep1EnergyRow.size());
-    EXPECT_NEAR(actual_energy.front().values[0], kArchivedStep1EnergyRow[0], 1e-12);
-    EXPECT_LE(relative_error(actual_energy.front().values[1], kArchivedStep1EnergyRow[1], 1e-12), 1e-4);
-    EXPECT_LE(relative_error(actual_energy.front().values[5], kArchivedStep1EnergyRow[5], 1e-12), 1e-4);
+    ASSERT_EQ(actual_energy.front().values.size(), oracle_energy.front().values.size());
+    EXPECT_NEAR(actual_energy.front().values[0], oracle_energy.front().values[0], 1e-12);
+    EXPECT_LE(relative_error(actual_energy.front().values[1], oracle_energy.front().values[1], 1e-12), 1e-4);
+    EXPECT_LE(relative_error(actual_energy.front().values[5], oracle_energy.front().values[5], 1e-12), 1e-4);
 
     const auto actual_force = read_positive_load_rows(temp_case_dir_ / "force.dat", /*skip_header=*/false);
+    const auto oracle_force = read_positive_load_rows(kCaseDir / "force.dat", /*skip_header=*/false);
     ASSERT_FALSE(actual_force.empty());
-    ASSERT_EQ(actual_force.front().values.size(), kArchivedStep1ForceRow.size());
-    for (std::size_t col = 0; col < kArchivedStep1ForceRow.size(); ++col) {
-        EXPECT_LE(relative_error(actual_force.front().values[col], kArchivedStep1ForceRow[col], 1e-12), 1e-3)
+    ASSERT_FALSE(oracle_force.empty());
+    ASSERT_EQ(actual_force.front().values.size(), oracle_force.front().values.size());
+    for (std::size_t col = 0; col < oracle_force.front().values.size(); ++col) {
+        EXPECT_LE(relative_error(actual_force.front().values[col], oracle_force.front().values[col], 1e-12), 1e-3)
             << "step1 force col " << col;
     }
 }
