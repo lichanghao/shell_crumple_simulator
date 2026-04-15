@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <random>
@@ -305,6 +306,25 @@ void write_final_config(const SimulatorInput& input,
                      input.dims.ngauss);
 }
 
+void write_runtime_checkpoint(const SimulatorInput& input,
+                              const RuntimeState& state,
+                              const std::string& output_dir,
+                              const int iload,
+                              const int icycle) {
+    io::CheckpointData checkpoint;
+    checkpoint.iload = iload;
+    checkpoint.icycle = icycle;
+    checkpoint.config.coords = state.coords;
+    checkpoint.config.eta = state.eta;
+    checkpoint.K0_ref = state.K0_ref;
+    io::write_checkpoint(output_dir + "/nano_checkpoint.dat",
+                         checkpoint,
+                         input.mesh.numnods,
+                         input.mesh.numele,
+                         input.dims.ngauss,
+                         input.crease.ncrease == 1);
+}
+
 }  // namespace
 
 // ─── minimize_free ────────────────────────────────────────────────────────────
@@ -459,9 +479,9 @@ void pasapas(const SimulatorInput& input,
              int iload_stop) {
     const BCData& bcs = input.bcs;
 
-    if (bcs.nCodeLoad != 3) {
-        throw std::runtime_error("pasapas: only nCodeLoad=3 is supported (got " +
-                                 std::to_string(bcs.nCodeLoad) + ")");
+    if (bcs.nCodeLoad != 3 && bcs.nCodeLoad != 30 && bcs.nCodeLoad != 31) {
+        throw std::runtime_error("pasapas: unsupported nCodeLoad " +
+                                 std::to_string(bcs.nCodeLoad));
     }
     const int final_load = iload_stop > 0 ? iload_stop : bcs.nloadstep;
     if (final_load < iload_start || final_load > bcs.nloadstep) {
@@ -472,54 +492,64 @@ void pasapas(const SimulatorInput& input,
     LoadController load_ctrl(bcs);
     load_ctrl.init(state.coords);
 
-    // ── Step 0: free minimisation (mirrors Fortran pasapas.f90 lines 55-62) ───
-    auto step0 = minimize_free(input, state, mpi, eps);
-    write_eta_dump_if_enabled(state, "post_free", 0, mpi);
+    if (iload_start == 1) {
+        // ── Step 0: free minimisation (mirrors Fortran pasapas.f90 lines 55-62) ───
+        auto step0 = minimize_free(input, state, mpi, eps);
+        write_eta_dump_if_enabled(state, "post_free", 0, mpi);
 
-    // Mirrors Fortran: write(*,*) 'enforce the boundary change' then x0_BC=x0(mdofBC).
-    if (mpi.is_root()) {
-        std::cout << "enforce the boundary change\n";
-    }
+        if (mpi.is_root()) {
+            std::cout << "enforce the boundary change\n";
+        }
 
-    // Snap BC positions from the minimised state.
-    load_ctrl.init(state.coords);
+        load_ctrl.init(state.coords);
 
-    // Write energy.dat: header + step 0 (mirrors Fortran Optim.f90 + pasapas.f90 line 66).
-    // Also truncate force.dat so a fresh run doesn't append to a stale file.
-    if (mpi.is_root() && iload_start == 1) {
-        std::ofstream ff(output_dir + "/force.dat", std::ios::out | std::ios::trunc);
-        (void)ff;
-        write_output_header(output_dir, step0.E.E_total);
-    }
-    if (mpi.is_root()) {
-        const std::string energy_path = output_dir + "/energy.dat";
-        std::ofstream ef(energy_path, std::ios::out | std::ios::trunc);
-        if (!ef) throw std::runtime_error("cannot open " + energy_path);
-        // Header: 'Load_Step', 'E_total', 'E_internal', 'E_vdw', 'E_external', 'GNORM'
-        ef << std::setw(14) << "Load_Step"
-           << std::setw(16) << "E_total"
-           << std::setw(16) << "E_internal"
-           << std::setw(16) << "E_vdw"
-           << std::setw(16) << "E_external"
-           << std::setw(16) << "GNORM"
-           << "\n";
-        // Step 0 row: format '(e14.5, 5e16.8)'.
-        ef << std::scientific << std::setprecision(5)
-           << std::setw(14) << 0.0
-           << std::setprecision(8)
-           << std::setw(16) << step0.E.E_total
-           << std::setw(16) << step0.E.E_internal
-           << std::setw(16) << step0.E.E_vdw
-           << std::setw(16) << step0.E.E_external
-           << std::setw(16) << step0.gnorm
-           << "\n";
-        write_mesh_snapshot(input, state, output_dir, 0);
+        if (mpi.is_root()) {
+            std::ofstream ff(output_dir + "/force.dat", std::ios::out | std::ios::trunc);
+            (void)ff;
+            write_output_header(output_dir, step0.E.E_total);
+
+            const std::string energy_path = output_dir + "/energy.dat";
+            std::ofstream ef(energy_path, std::ios::out | std::ios::trunc);
+            if (!ef) throw std::runtime_error("cannot open " + energy_path);
+            ef << std::setw(14) << "Load_Step"
+               << std::setw(16) << "E_total"
+               << std::setw(16) << "E_internal"
+               << std::setw(16) << "E_vdw"
+               << std::setw(16) << "E_external"
+               << std::setw(16) << "GNORM"
+               << "\n";
+            ef << std::scientific << std::setprecision(5)
+               << std::setw(14) << 0.0
+               << std::setprecision(8)
+               << std::setw(16) << step0.E.E_total
+               << std::setw(16) << step0.E.E_internal
+               << std::setw(16) << step0.E.E_vdw
+               << std::setw(16) << step0.E.E_external
+               << std::setw(16) << step0.gnorm
+               << "\n";
+            write_mesh_snapshot(input, state, output_dir, 0);
+        }
+    } else {
+        load_ctrl.init(state.coords);
     }
 
     // ── Load steps ────────────────────────────────────────────────────────────
     for (int iload = iload_start; iload <= final_load; ++iload) {
+        int icycle = 1;
+        int iphase = 1;
+        int iload_in_cycle = iload;
+        if (bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31) {
+            const int steps_per_cycle = bcs.nloadstep_comp + bcs.nloadstep_rel;
+            icycle = (iload - 1) / steps_per_cycle + 1;
+            iload_in_cycle = ((iload - 1) % steps_per_cycle) + 1;
+            iphase = iload_in_cycle <= bcs.nloadstep_comp ? 1 : 2;
+        }
+
         if (mpi.is_root()) {
             std::cout << "***\n Load Step: " << iload << "\n";
+            if (bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31) {
+                std::cout << " Cycle: " << icycle << " Phase: " << iphase << "\n";
+            }
         }
 
         // Apply load increment (moves BC nodes, updates coords).
@@ -545,34 +575,54 @@ void pasapas(const SimulatorInput& input,
         if (mpi.is_root()) {
             std::cout << " Equilibrium energy: " << min_res.E.E_total << "\n";
 
-            // Write energy row.
-            // Fortran format: '(e14.5,4e16.8,d17.9)'
             const std::string energy_path = output_dir + "/energy.dat";
             std::ofstream ef(energy_path, std::ios::app);
-            ef << std::scientific << std::setprecision(5)
-               << std::setw(14) << load_param
-               << std::setprecision(8)
-               << std::setw(16) << min_res.E.E_total
-               << std::setw(16) << min_res.E.E_internal
-               << std::setw(16) << min_res.E.E_vdw
-               << std::setw(16) << min_res.E.E_external
-               << std::scientific << std::setprecision(9)
-               << std::setw(17) << min_res.gnorm
-               << "\n";
-
-            // Write force row.
-            // Fortran format: '(4f17.9)'
             const std::string force_path = output_dir + "/force.dat";
             std::ofstream ff(force_path, std::ios::app);
-            ff << std::fixed << std::setprecision(9)
-               << std::setw(17) << load_param
-               << std::setw(17) << min_res.E_min
-               << std::setw(17) << reaction1
-               << std::setw(17) << reaction2
-               << "\n";
+            if (bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31) {
+                ef << std::setw(8) << iload
+                   << std::setw(6) << icycle
+                   << std::setw(4) << iphase
+                   << std::scientific << std::setprecision(8)
+                   << std::setw(16) << min_res.E.E_total
+                   << std::setw(16) << min_res.E.E_internal
+                   << std::setw(16) << min_res.E.E_vdw
+                   << std::setw(16) << min_res.E.E_external
+                   << std::scientific << std::setprecision(9)
+                   << std::setw(17) << min_res.gnorm
+                   << "\n";
+                ff << std::setw(8) << iload
+                   << std::setw(6) << icycle
+                   << std::setw(4) << iphase
+                   << std::fixed << std::setprecision(9)
+                   << std::setw(17) << reaction1
+                   << std::setw(17) << reaction2
+                   << "\n";
+            } else {
+                ef << std::scientific << std::setprecision(5)
+                   << std::setw(14) << load_param
+                   << std::setprecision(8)
+                   << std::setw(16) << min_res.E.E_total
+                   << std::setw(16) << min_res.E.E_internal
+                   << std::setw(16) << min_res.E.E_vdw
+                   << std::setw(16) << min_res.E.E_external
+                   << std::scientific << std::setprecision(9)
+                   << std::setw(17) << min_res.gnorm
+                   << "\n";
+                ff << std::fixed << std::setprecision(9)
+                   << std::setw(17) << load_param
+                   << std::setw(17) << min_res.E_min
+                   << std::setw(17) << reaction1
+                   << std::setw(17) << reaction2
+                   << "\n";
+            }
 
             append_output_step(output_dir, iload, min_res.E.E_total);
             write_mesh_snapshot(input, state, output_dir, iload);
+            if ((bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31) &&
+                iload_in_cycle == bcs.nloadstep_comp + bcs.nloadstep_rel) {
+                write_runtime_checkpoint(input, state, output_dir, iload, icycle);
+            }
         }
     }
 

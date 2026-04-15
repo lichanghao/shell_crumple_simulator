@@ -133,7 +133,7 @@ TEST(ReadCheckpoint, GrapheneCyclicCrumple) {
                                                1681,
                                                3200,
                                                2,
-                                               /*has_crease_memory=*/false);
+                                               /*has_crease_memory=*/true);
     EXPECT_EQ(checkpoint.iload, 200);
     EXPECT_EQ(checkpoint.icycle, 5);
     ASSERT_EQ(static_cast<int>(checkpoint.config.coords.size()), 1681);
@@ -145,7 +145,11 @@ TEST(ReadCheckpoint, GrapheneCyclicCrumple) {
     EXPECT_NEAR(checkpoint.config.coords[1][0], 5.0014290770334624e-1, 1e-15);
     EXPECT_NEAR(checkpoint.config.coords[1][1], 5.7573756533081263e-5, 1e-18);
     EXPECT_NEAR(checkpoint.config.coords[1][2], -5.2338478808536719e-3, 1e-18);
-    EXPECT_TRUE(checkpoint.K0_ref.empty());
+    ASSERT_EQ(checkpoint.K0_ref.size(), 3200U);
+    ASSERT_EQ(checkpoint.K0_ref.front().size(), 2U);
+    EXPECT_DOUBLE_EQ(checkpoint.K0_ref.front().front()[0], 0.0);
+    EXPECT_DOUBLE_EQ(checkpoint.K0_ref.front().front()[1], 0.0);
+    EXPECT_DOUBLE_EQ(checkpoint.K0_ref.front().front()[2], 0.0);
 }
 
 // ─── nano_BCs.dat ─────────────────────────────────────────────────────────────

@@ -33,6 +33,15 @@ struct ElementEnergyResult {
 // Returns W_elem, f_elem (12×3), updated eta per Gauss point, and inner_fail count.
 ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
                                            const Mat22& f0,
+                                           const std::vector<Voigt3>& reference_curvature,
+                                           const GaussData& gauss,
+                                           const MatData& mat,
+                                           bool nW_hat,
+                                           double crit,
+                                           int max_iter,
+                                           const std::vector<Vec2>& eta0);
+ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
+                                           const Mat22& f0,
                                            const Voigt3& reference_curvature,
                                            const GaussData& gauss,
                                            const MatData& mat,

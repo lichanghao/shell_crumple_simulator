@@ -12,7 +12,7 @@ namespace fce {
 
 ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
                                            const Mat22& f0,
-                                           const Voigt3& reference_curvature,
+                                           const std::vector<Voigt3>& reference_curvature,
                                            const GaussData& gauss,
                                            const MatData& mat,
                                            const bool nW_hat,
@@ -22,6 +22,9 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
     const int ngauss = gauss.ngauss;
     if (static_cast<int>(eta0.size()) != ngauss) {
         throw std::invalid_argument("eta0 size must equal ngauss");
+    }
+    if (static_cast<int>(reference_curvature.size()) != ngauss) {
+        throw std::invalid_argument("reference_curvature size must equal ngauss");
     }
 
     ElementEnergyResult result;
@@ -38,7 +41,12 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
         }
 
         // Geometry: metric → curvature → principal curvatures and eigenvectors
-        const ElementState state = compute_element_state(xneigh, dn, ddn, f0, reference_curvature);
+        const ElementState state =
+            compute_element_state(xneigh,
+                                  dn,
+                                  ddn,
+                                  f0,
+                                  reference_curvature.at(static_cast<std::size_t>(igauss)));
 
         // Inner Newton relaxation (if nW_hat)
         Vec2 eta_gauss = result.eta[igauss];
@@ -148,6 +156,27 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
     }
 
     return result;
+}
+
+ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
+                                           const Mat22& f0,
+                                           const Voigt3& reference_curvature,
+                                           const GaussData& gauss,
+                                           const MatData& mat,
+                                           const bool nW_hat,
+                                           const double crit,
+                                           const int max_iter,
+                                           const std::vector<Vec2>& eta0) {
+    return compute_element_energy(xneigh,
+                                  f0,
+                                  std::vector<Voigt3>(static_cast<std::size_t>(gauss.ngauss),
+                                                      reference_curvature),
+                                  gauss,
+                                  mat,
+                                  nW_hat,
+                                  crit,
+                                  max_iter,
+                                  eta0);
 }
 
 }  // namespace fce

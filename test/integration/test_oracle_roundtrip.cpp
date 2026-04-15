@@ -113,10 +113,10 @@ TEST(RoundTrip, Checkpoint) {
                                        1681,
                                        3200,
                                        2,
-                                       /*has_crease_memory=*/false);
+                                       /*has_crease_memory=*/true);
     std::string tmp = kTmp + "checkpoint.dat";
-    fce::io::write_checkpoint(tmp, c1, 1681, 3200, 2, /*has_crease_memory=*/false);
-    auto c2 = fce::io::read_checkpoint(tmp, 1681, 3200, 2, /*has_crease_memory=*/false);
+    fce::io::write_checkpoint(tmp, c1, 1681, 3200, 2, /*has_crease_memory=*/true);
+    auto c2 = fce::io::read_checkpoint(tmp, 1681, 3200, 2, /*has_crease_memory=*/true);
 
     EXPECT_EQ(c1.iload, c2.iload);
     EXPECT_EQ(c1.icycle, c2.icycle);
@@ -132,6 +132,16 @@ TEST(RoundTrip, Checkpoint) {
         for (std::size_t igauss = 0; igauss < c1.config.eta[ielem].size(); ++igauss) {
             for (int axis = 0; axis < 2; ++axis) {
                 EXPECT_NEAR(c1.config.eta[ielem][igauss][axis], c2.config.eta[ielem][igauss][axis], 1e-12)
+                    << "ielem=" << ielem << " igauss=" << igauss << " axis=" << axis;
+            }
+        }
+    }
+    ASSERT_EQ(c1.K0_ref.size(), c2.K0_ref.size());
+    for (std::size_t ielem = 0; ielem < c1.K0_ref.size(); ++ielem) {
+        ASSERT_EQ(c1.K0_ref[ielem].size(), c2.K0_ref[ielem].size());
+        for (std::size_t igauss = 0; igauss < c1.K0_ref[ielem].size(); ++igauss) {
+            for (int axis = 0; axis < 3; ++axis) {
+                EXPECT_NEAR(c1.K0_ref[ielem][igauss][axis], c2.K0_ref[ielem][igauss][axis], 1e-12)
                     << "ielem=" << ielem << " igauss=" << igauss << " axis=" << axis;
             }
         }

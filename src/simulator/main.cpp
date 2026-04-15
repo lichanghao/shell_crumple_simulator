@@ -2,6 +2,7 @@
 #include "fce/solver.hpp"
 #include "fce/mpi_env.hpp"
 
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <optional>
@@ -79,6 +80,24 @@ int main(int argc, char** argv) {
             }
         } else {
             auto state = fce::make_runtime_state(input);
+            int iload_start = 1;
+            if (input.bcs.nCodeLoad == 30 || input.bcs.nCodeLoad == 31) {
+                const std::filesystem::path checkpoint_path =
+                    std::filesystem::path(case_dir) / "nano_checkpoint.dat";
+                if (std::filesystem::exists(checkpoint_path)) {
+                    const auto checkpoint = fce::io::read_checkpoint(checkpoint_path.string(),
+                                                                     input.mesh.numnods,
+                                                                     input.mesh.numele,
+                                                                     input.dims.ngauss,
+                                                                     input.crease.ncrease == 1);
+                    state.coords = checkpoint.config.coords;
+                    state.eta = checkpoint.config.eta;
+                    if (!checkpoint.K0_ref.empty()) {
+                        state.K0_ref = checkpoint.K0_ref;
+                    }
+                    iload_start = checkpoint.iload + 1;
+                }
+            }
 
             const double eps = input.general.crit_global > 0.0 ? input.general.crit_global : 1.0e-8;
             fce::pasapas(input,
@@ -86,7 +105,7 @@ int main(int argc, char** argv) {
                          mpi,
                          case_dir,
                          eps,
-                         1,
+                         iload_start,
                          requested_stop_step.value_or(input.bcs.nloadstep));
         }
     } catch (const std::exception& e) {

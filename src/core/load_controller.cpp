@@ -30,7 +30,7 @@ void LoadController::init(const Coords& coords) {
 
 // ─── apply_increment ─────────────────────────────────────────────────────────
 
-void LoadController::apply_increment(int /*iload*/, Coords& coords) {
+void LoadController::apply_increment(int iload, Coords& coords) {
     const int ncode = bcs_.nCodeLoad;
 
     if (ncode == 3) {
@@ -63,7 +63,47 @@ void LoadController::apply_increment(int /*iload*/, Coords& coords) {
                 x0_bc_.at(static_cast<std::size_t>(k));
         }
     } else if (ncode == 30 || ncode == 31) {
-        throw std::runtime_error("nCodeLoad 30/31 not yet implemented");
+        const int steps_per_cycle = bcs_.nloadstep_comp + bcs_.nloadstep_rel;
+        if (steps_per_cycle <= 0) {
+            throw std::runtime_error("cyclic load controller requires positive steps_per_cycle");
+        }
+        const int iload_in_cycle = ((iload - 1) % steps_per_cycle) + 1;
+        const bool compression_phase = iload_in_cycle <= bcs_.nloadstep_comp;
+        const double dl = compression_phase
+            ? (bcs_.value_comp / static_cast<double>(bcs_.nloadstep_comp))
+            : (bcs_.value_rel / static_cast<double>(bcs_.nloadstep_rel));
+        const double sign = compression_phase ? -1.0 : 1.0;
+
+        for (int inod = 0; inod < bcs_.nnodBC; ++inod) {
+            const int side_tag = bcs_.mnodBC.at(static_cast<std::size_t>(inod))[1];
+            if (ncode == 30) {
+                if (side_tag == 1) {
+                    x0_bc_.at(static_cast<std::size_t>(3 * inod)) += sign * dl;
+                }
+                continue;
+            }
+
+            if (side_tag == 1) {
+                continue;
+            }
+            if (side_tag == 2 || side_tag == 3) {
+                const int axis = side_tag - 2;
+                x0_bc_.at(static_cast<std::size_t>(3 * inod + axis)) += sign * dl;
+                continue;
+            }
+            if (side_tag == 4) {
+                x0_bc_.at(static_cast<std::size_t>(3 * inod)) += sign * dl;
+                x0_bc_.at(static_cast<std::size_t>(3 * inod + 1)) += sign * dl;
+            }
+        }
+
+        for (int k = 0; k < bcs_.ndofBC; ++k) {
+            const int flat_dof = bcs_.mdofBC.at(static_cast<std::size_t>(k));
+            const int inode = flat_dof / 3;
+            const int axis  = flat_dof % 3;
+            coords.at(static_cast<std::size_t>(inode))[axis] =
+                x0_bc_.at(static_cast<std::size_t>(k));
+        }
     } else {
         throw std::runtime_error("LoadController::apply_increment: nCodeLoad " +
                                  std::to_string(ncode) + " not supported");

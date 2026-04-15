@@ -36,6 +36,8 @@ constexpr const char* kCrunchItBinPath = "build/crunch_it";
 
 const fs::path kCaseDir =
     fs::path(kOracleDir) / "graphene_compression_simulator" / "np1";
+const fs::path kCyclicCaseDir =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "prepro_run";
 const fs::path kSelfContactCaseDir =
     fs::path(kOracleDir) / "graphene_self_contact" / "prepro_run";
 const fs::path kXmlValidatorScript =
@@ -765,6 +767,31 @@ int count_output_load_steps(const fs::path& output_path) {
     return count;
 }
 
+std::vector<std::string> last_data_tokens(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open data file: " + path.string());
+    }
+
+    std::vector<std::string> tokens;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        std::vector<std::string> current;
+        std::string token;
+        while (row >> token) {
+            current.push_back(token);
+        }
+        if (!current.empty()) {
+            tokens = std::move(current);
+        }
+    }
+    if (tokens.empty()) {
+        throw std::runtime_error("no data rows found in " + path.string());
+    }
+    return tokens;
+}
+
 double relative_error(const double actual, const double expected, const double floor) {
     return std::abs(actual - expected) / std::max(std::abs(expected), floor);
 }
@@ -798,6 +825,25 @@ protected:
         temp_case_dir_ = temp_root / "prepro_run";
         fs::copy(kSelfContactCaseDir, temp_case_dir_, fs::copy_options::recursive);
         remove_runtime_outputs(temp_case_dir_);
+    }
+
+    void TearDown() override {
+        if (!temp_case_dir_.empty()) {
+            fs::remove_all(temp_case_dir_.parent_path());
+        }
+    }
+};
+
+class E2ECyclicRuntime : public ::testing::Test {
+protected:
+    fs::path temp_case_dir_;
+
+    void SetUp() override {
+        const fs::path temp_root = make_temp_dir();
+        temp_case_dir_ = temp_root / "prepro_run";
+        fs::copy(kCyclicCaseDir, temp_case_dir_, fs::copy_options::recursive);
+        remove_runtime_outputs(temp_case_dir_);
+        fs::remove(temp_case_dir_ / "nano_checkpoint.dat");
     }
 
     void TearDown() override {
@@ -1315,6 +1361,28 @@ TEST_F(E2ECompression, CrunchItStepOneRowsMatchCommittedReplayFixture) {
         EXPECT_LE(relative_error(actual_force.front().values[i], replay_force.front().values[i], 1e-12), 1e-3)
             << "force row column " << i;
     }
+}
+
+TEST_F(E2ECyclicRuntime, CrunchItRunsFirstCyclicStepAndWritesCyclicRowFormat) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const auto energy_tokens = last_data_tokens(temp_case_dir_ / "energy.dat");
+    const auto force_tokens = last_data_tokens(temp_case_dir_ / "force.dat");
+
+    ASSERT_GE(energy_tokens.size(), 8U);
+    ASSERT_GE(force_tokens.size(), 5U);
+    EXPECT_EQ(energy_tokens[0], "1");
+    EXPECT_EQ(energy_tokens[1], "1");
+    EXPECT_EQ(energy_tokens[2], "1");
+    EXPECT_EQ(force_tokens[0], "1");
+    EXPECT_EQ(force_tokens[1], "1");
+    EXPECT_EQ(force_tokens[2], "1");
+    EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(energy_tokens[3])));
+    EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(force_tokens[3])));
+    EXPECT_TRUE(fs::exists(temp_case_dir_ / "mesh_config_0001.vtu"));
+    EXPECT_FALSE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
 }
 
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {

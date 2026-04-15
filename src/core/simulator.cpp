@@ -267,12 +267,22 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     for (int ielem = element_begin; ielem < element_end; ++ielem) {
         const auto xneigh = gather_neighbor_patch(input.mesh, coords_with_ghosts, ielem);
         const auto& eta0 = state.eta.at(static_cast<std::size_t>(ielem));
+        std::vector<Voigt3> reference_curvature(static_cast<std::size_t>(input.dims.ngauss),
+                                                Voigt3{0.0, 0.0, 0.0});
+        if (!state.K0_ref.empty()) {
+            const auto& elem_k0 = state.K0_ref.at(static_cast<std::size_t>(ielem));
+            for (int igauss = 0; igauss < input.dims.ngauss; ++igauss) {
+                const auto& kappa = elem_k0.at(static_cast<std::size_t>(igauss));
+                reference_curvature[static_cast<std::size_t>(igauss)] =
+                    Voigt3{kappa[0], kappa[1], kappa[2]};
+            }
+        }
         const auto elem = [&]() {
             try {
                 return compute_element_energy(
                     xneigh,
                     input.ref_config.at(static_cast<std::size_t>(ielem)).F0,
-                    Voigt3{0.0, 0.0, 0.0},
+                    reference_curvature,
                     input.gauss,
                     input.general.mat,
                     input.general.nW_hat,
