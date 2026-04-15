@@ -1374,6 +1374,8 @@ TEST_F(E2ECompression, CrunchItStepOneRowsMatchCommittedReplayFixture) {
 TEST_F(E2ECyclicRuntime, CrunchItReplaysCommittedCyclicStepOneTraceDeterministically) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayStepOneEnergyFixture)) << "Missing cyclic replay energy fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayStepOneForceFixture)) << "Missing cyclic replay force fixture";
 
     fs::copy_file(kCyclicReplayTraceFixture,
                   temp_case_dir_ / "imperfection_trace.dat",
@@ -1383,11 +1385,15 @@ TEST_F(E2ECyclicRuntime, CrunchItReplaysCommittedCyclicStepOneTraceDeterministic
 
     const auto energy_tokens = last_data_tokens(temp_case_dir_ / "energy.dat");
     const auto force_tokens = last_data_tokens(temp_case_dir_ / "force.dat");
+    const auto replay_energy_tokens = last_data_tokens(kCyclicReplayStepOneEnergyFixture);
+    const auto replay_force_tokens = last_data_tokens(kCyclicReplayStepOneForceFixture);
     const std::string energy_first = read_file(temp_case_dir_ / "energy.dat");
     const std::string force_first = read_file(temp_case_dir_ / "force.dat");
 
     ASSERT_GE(energy_tokens.size(), 8U);
     ASSERT_GE(force_tokens.size(), 5U);
+    ASSERT_EQ(energy_tokens.size(), replay_energy_tokens.size());
+    ASSERT_EQ(force_tokens.size(), replay_force_tokens.size());
     EXPECT_EQ(energy_tokens[0], "1");
     EXPECT_EQ(energy_tokens[1], "1");
     EXPECT_EQ(energy_tokens[2], "1");
@@ -1395,11 +1401,17 @@ TEST_F(E2ECyclicRuntime, CrunchItReplaysCommittedCyclicStepOneTraceDeterministic
     EXPECT_EQ(force_tokens[1], "1");
     EXPECT_EQ(force_tokens[2], "1");
     for (std::size_t col = 3; col < energy_tokens.size(); ++col) {
-        EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(energy_tokens[col])))
+        EXPECT_LE(relative_error(fce::io::parse_fortran_double(energy_tokens[col]),
+                                 fce::io::parse_fortran_double(replay_energy_tokens[col]),
+                                 1e-12),
+                  1e-4)
             << "energy col " << col;
     }
     for (std::size_t col = 3; col < force_tokens.size(); ++col) {
-        EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(force_tokens[col])))
+        EXPECT_LE(relative_error(fce::io::parse_fortran_double(force_tokens[col]),
+                                 fce::io::parse_fortran_double(replay_force_tokens[col]),
+                                 1e-12),
+                  1e-3)
             << "force col " << col;
     }
     EXPECT_TRUE(fs::exists(temp_case_dir_ / "mesh_config_0001.vtu"));
