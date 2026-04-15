@@ -26,11 +26,31 @@ Simulator reference outputs for the standard graphene compression case — seria
   `pasapas.f90` runtime loop against the same archived `nano_*.dat` input. It is used by the
   C++ integration harness when it copies this archived case to a temp directory; it is not part
   of the original frozen output set in `np1/`.
+- Deterministic replay monitor fixture: `graphene_compression_simulator/replay_step1_monitor.dat`
+  records the first constrained-step monitor rows from a same-trace O3 Fortran replay using the
+  committed `imperfection_trace_fortran.dat`. It is the replay-specific oracle for trace-driven
+  step-1 monitor comparisons and is intentionally separate from the frozen `np1/` archived output
+  set.
+- Deterministic replay stdout excerpt: `graphene_compression_simulator/replay_step1_stdout.txt`
+  is the matching executable-path runtime monitor excerpt captured from `crunch_it` for the same
+  replay lane. Tests use it to validate the runtime monitor parser without rerunning the expensive
+  monitored executable path.
+- Deterministic replay eval fixture: `graphene_compression_simulator/replay_step1_eval_sequence.dat`
+  records the corresponding early constrained-evaluation energy sequence from the same replay and
+  is the replay-specific oracle for deterministic step-1 evaluation-prefix comparisons.
+- Deterministic replay output rows: `graphene_compression_simulator/replay_step1_energy.dat` and
+  `graphene_compression_simulator/replay_step1_force.dat` capture the first positive-load runtime
+  rows from the same replay and serve as the executable-path replay oracle for `energy.dat` and
+  `force.dat`.
 - Provenance note: `graphene_compression_simulator/build_provenance.md`
 - Confirmed single-rank: `simulator.log` line 1: "Numero de procesadores: 1"
 - Oracle outputs: `energy.dat`, `force.dat`, `nano_final_config.dat`, `output.dat`,
   `simulator.log`, `mesh_config_0000.vtu` … `mesh_config_0050.vtu` (51 VTU snapshots),
   `mesh_config_series.pvd`
+- Important caveat: for step 1, the archived numeric oracle is `energy.dat`, `force.dat`, and
+  `mesh_config_0001.vtu`. The frozen `np1/simulator.log` step-one equilibrium line does not match
+  those archived numeric artifacts, so it should be treated as historical context rather than the
+  authoritative step-one energy oracle.
 - Final energy: 1.3427137479171509E-003 (load step 50, IFLAG=0)
 
 ### graphene_cyclic_crumple/

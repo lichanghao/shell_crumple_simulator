@@ -42,6 +42,13 @@ Eofnode*
 
 # Test-case build and run directories
 test/cases/*
+!test/cases/graphene_compression_simulator/
+test/cases/graphene_compression_simulator/*
+!test/cases/graphene_compression_simulator/replay_step1_monitor.dat
+!test/cases/graphene_compression_simulator/replay_step1_eval_sequence.dat
+!test/cases/graphene_compression_simulator/replay_step1_energy.dat
+!test/cases/graphene_compression_simulator/replay_step1_force.dat
+!test/cases/graphene_compression_simulator/replay_step1_stdout.txt
 document/*
 build/*
 

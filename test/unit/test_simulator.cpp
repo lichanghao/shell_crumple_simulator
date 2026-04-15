@@ -72,6 +72,22 @@ fs::path step_vtu_path(const fs::path& case_dir, const int step) {
     return case_dir / name.str();
 }
 
+std::size_t count_output_load_steps(const fs::path& output_path) {
+    std::ifstream in(output_path);
+    if (!in) {
+        throw std::runtime_error("cannot open output oracle: " + output_path.string());
+    }
+
+    std::size_t count = 0;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.find("Load Step") != std::string::npos) {
+            ++count;
+        }
+    }
+    return count;
+}
+
 }  // namespace
 
 TEST(SimulatorAssembly, LoadStepOneEnergyMatchesArchivedCompressionOracle) {
@@ -97,13 +113,14 @@ TEST(SimulatorAssembly, ArchivedEnergyTrajectoryMatchesOracleFile) {
     const auto input = fce::load_simulator_input(case_dir.string());
     const auto energies = read_archived_step_energies(case_dir / "energy.dat");
 
-    ASSERT_EQ(energies.size(), 50U);
-    for (int step = 1; step <= 50; ++step) {
+    ASSERT_EQ(energies.size(), count_output_load_steps(case_dir / "output.dat"));
+    for (std::size_t step_index = 0; step_index < energies.size(); ++step_index) {
+        const int step = static_cast<int>(step_index + 1);
         const auto coords = fce::read_vtu_points(
             step_vtu_path(case_dir, step).string(),
             input.mesh.numnods);
         const auto result = fce::assemble_energy_forces(input, coords, 0, input.mesh.numele);
-        const double expected_energy = energies[static_cast<std::size_t>(step - 1)];
+        const double expected_energy = energies[step_index];
         EXPECT_NEAR(result.total_energy, expected_energy, relative_tolerance(expected_energy))
             << "step=" << step;
     }

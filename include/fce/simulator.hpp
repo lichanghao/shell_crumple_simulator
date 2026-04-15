@@ -29,6 +29,7 @@ struct RuntimeState {
 
 struct AssemblyResult {
     double total_energy{0.0};
+    double reduced_energy{0.0};
     std::vector<double> force{};
     int inner_fail{0};
     EtaField eta_updates{};

@@ -134,8 +134,8 @@ double compute_xnorm0(const Coords& coords) {
 // sub-components are not decomposed in the current C++ assembly (VdW not active).
 EnergyComponents to_energy_components(const AssemblyResult& res) {
     EnergyComponents e;
-    e.E_total    = res.total_energy;
-    e.E_internal = res.total_energy;  // no vdw/external separation yet
+    e.E_total    = res.reduced_energy;
+    e.E_internal = res.reduced_energy;  // no vdw/external separation yet
     e.E_vdw      = 0.0;
     e.E_external = 0.0;
     return e;
@@ -377,7 +377,7 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
     MinimizeFreeResult result;
     result.E     = final_E;
     result.gnorm = gnorm;
-    result.E_min = final_E.E_total;
+    result.E_min = final_asm.total_energy;
     result.assembly = final_asm;
 
     (void)flag;
@@ -441,7 +441,7 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     MinimizeResult result;
     result.E     = final_E;
     result.gnorm = gnorm;
-    result.E_min = final_E.E_total;
+    result.E_min = final_asm.total_energy;
     result.assembly = final_asm;
 
     (void)flag;

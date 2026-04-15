@@ -137,6 +137,7 @@ private:
     double sty_{0.0};
     double fy_{0.0};
     double dgy_{0.0};
+    int    deriv_trace_eval_{0};
 };
 
 }  // namespace fce

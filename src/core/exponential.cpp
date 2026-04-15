@@ -1,5 +1,9 @@
 #include "fce/exponential.hpp"
 
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+
 #include "fce/taylor.hpp"
 
 #include <algorithm>
@@ -67,13 +71,21 @@ BondState compute_deformed_bonds(const Voigt3& C_elem,
                                  const std::array<Vec2, 3>& Ei) {
     BondState out;
     std::array<std::array<double, 3>, 3> a_def{};
+    const bool zero_curvature =
+        curvppal[0] == 0.0 && curvppal[1] == 0.0;
 
     for (int i = 0; i < 3; ++i) {
         const Vec2 ttemp = c_vec(C_elem, Ei[i]);
-        const double temp3 = dot(vppal[0], ttemp);
-        const double temp4 = dot(vppal[1], ttemp);
+        const double temp3 = vppal[0][0] * ttemp[0] + vppal[0][1] * ttemp[1];
+        const double temp4 = vppal[1][0] * ttemp[0] + vppal[1][1] * ttemp[1];
         const double p = A_norm[i] * temp3;
         const double q = A_norm[i] * temp4;
+
+        if (zero_curvature) {
+            a_def[i] = {p, q, 0.0};
+            out.pe[i] = std::sqrt(p * p + q * q);
+            continue;
+        }
 
         const double f1 = sinxx(curvppal[0] * p);
         const double f2 = sinxx(curvppal[1] * q);
@@ -83,16 +95,22 @@ BondState compute_deformed_bonds(const Voigt3& C_elem,
         a_def[i] = {
             p * f1,
             q * f2,
-            curvppal[0] * p * p / 2.0 * f12 * f12 + curvppal[1] * q * q / 2.0 * f22 * f22,
+            curvppal[0] * p * p / 2.0 * f12 * f12 +
+                curvppal[1] * q * q / 2.0 * f22 * f22,
         };
-        out.pe[i] = norm3(a_def[i]);
+        out.pe[i] = std::sqrt(a_def[i][0] * a_def[i][0] +
+                              a_def[i][1] * a_def[i][1] +
+                              a_def[i][2] * a_def[i][2]);
     }
 
     for (int k = 0; k < 3; ++k) {
         const int i = kBondPermutations[k][0];
         const int j = kBondPermutations[k][1];
-        const double cosine = std::clamp(dot3(a_def[i], a_def[j]) / (out.pe[i] * out.pe[j]), -1.0, 1.0);
-        out.pe[3 + k] = std::acos(cosine);
+        const double temp6 = a_def[i][0] * a_def[j][0] +
+                             a_def[i][1] * a_def[j][1] +
+                             a_def[i][2] * a_def[j][2];
+        out.pe[3 + k] = temp6 / out.pe[i] / out.pe[j];
+        out.pe[3 + k] = std::acos(out.pe[3 + k]);
     }
 
     return out;

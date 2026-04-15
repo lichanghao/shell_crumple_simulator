@@ -13,24 +13,87 @@
 #include "fce/lbfgs.hpp"
 
 #include <algorithm>
+#include <cctype>
+#include <cstdlib>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace fce {
 
 namespace {
 
+bool lbfgs_deriv_trace_enabled() {
+    const char* raw = std::getenv("FCE_LBFGS_DERIV_TRACE");
+    if (raw == nullptr) {
+        return false;
+    }
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return !(value.empty() || value == "0" || value == "false" ||
+             value == "no" || value == "off");
+}
+
+bool lbfgs_state_trace_enabled() {
+    const char* raw = std::getenv("FCE_LBFGS_STATE_TRACE");
+    if (raw == nullptr) {
+        return false;
+    }
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return !(value.empty() || value == "0" || value == "false" ||
+             value == "no" || value == "off");
+}
+
 double vec_dot(int n, const double* a, const double* b) {
-    double s = 0.0;
-    for (int i = 0; i < n; ++i) s += a[i] * b[i];
-    return s;
+    double sum = 0.0;
+    if (n <= 0) {
+        return sum;
+    }
+
+    const int m = n % 5;
+    for (int i = 0; i < m; ++i) {
+        sum += a[i] * b[i];
+    }
+    if (n < 5) {
+        return sum;
+    }
+
+    for (int i = m; i < n; i += 5) {
+        sum += a[i] * b[i]
+             + a[i + 1] * b[i + 1]
+             + a[i + 2] * b[i + 2]
+             + a[i + 3] * b[i + 3]
+             + a[i + 4] * b[i + 4];
+    }
+    return sum;
 }
 
 void vec_axpy(int n, double alpha, const double* x, double* y) {
-    if (n <= 0 || alpha == 0.0) return;
-    for (int i = 0; i < n; ++i) y[i] += alpha * x[i];
+    if (n <= 0 || alpha == 0.0) {
+        return;
+    }
+
+    const int m = n % 4;
+    for (int i = 0; i < m; ++i) {
+        y[i] += alpha * x[i];
+    }
+    if (n < 4) {
+        return;
+    }
+
+    for (int i = m; i < n; i += 4) {
+        y[i] += alpha * x[i];
+        y[i + 1] += alpha * x[i + 1];
+        y[i + 2] += alpha * x[i + 2];
+        y[i + 3] += alpha * x[i + 3];
+    }
 }
 
 }  // namespace
@@ -51,6 +114,8 @@ void LbfgsSolver::reset() {
     crit_conv_ = 1.0;
     stp_ = 1.0;
     nfev_ls_ = 0;
+    infoc_ = 1;
+    deriv_trace_eval_ = 0;
     stopped_on_trial_gnorm_gate_ = false;
 }
 
@@ -468,6 +533,7 @@ int LbfgsSolver::mcsrch(int n,
 
     if (!mcsrch_initialized_) {
         // First entry: validate and initialise.
+        infoc_ = 1;
         if (n <= 0 || stp <= zero || ftol < zero || gtol_ < zero ||
             xtol_arg < zero || stpmin_ < zero || stpmax_ < stpmin_ || maxfev <= 0) {
             return 0;
@@ -497,11 +563,28 @@ int LbfgsSolver::mcsrch(int n,
         // Re-entry: process the new f/g.
         nfev_ls_++;
         nfev = nfev_ls_;
+        deriv_trace_eval_++;
         double dg = zero;
         for (int j = 0; j < n; ++j) dg += g[j] * s[j];
+        if (lbfgs_deriv_trace_enabled()) {
+            const double gnorm = std::sqrt(vec_dot(n, g.data(), g.data()));
+            std::cout << "DERIV " << deriv_trace_eval_ << " " << nfev_ls_ << " "
+                      << std::uppercase << std::scientific << std::setprecision(16)
+                      << f << " " << dg << " " << gnorm << " " << stp << "\n";
+        }
 
         double ftest1 = finit_ + stp * dgtest_;
         int info = 0;
+        if (lbfgs_state_trace_enabled()) {
+            std::cout << "STATE_PRE " << deriv_trace_eval_ << " " << nfev_ls_ << " "
+                      << stage1_ << " " << brackt_ << " "
+                      << std::uppercase << std::scientific << std::setprecision(16)
+                      << stx_ << " " << sty_ << " "
+                      << fx_ << " " << fy_ << " "
+                      << dgx_ << " " << dgy_ << " "
+                      << width_ << " " << width1_ << " "
+                      << stp << " " << ftest1 << "\n";
+        }
 
         if ((brackt_ && (stp <= std::min(stx_, sty_) || stp >= std::max(stx_, sty_))) ||
             infoc_ == 0) {
@@ -559,6 +642,16 @@ int LbfgsSolver::mcsrch(int n,
             width1_ = width_;
             width_  = std::abs(sty_ - stx_);
         }
+        if (lbfgs_state_trace_enabled()) {
+            std::cout << "STATE_POST " << deriv_trace_eval_ << " " << nfev_ls_ << " "
+                      << stage1_ << " " << brackt_ << " "
+                      << std::uppercase << std::scientific << std::setprecision(16)
+                      << stx_ << " " << sty_ << " "
+                      << fx_ << " " << fy_ << " "
+                      << dgx_ << " " << dgy_ << " "
+                      << width_ << " " << width1_ << " "
+                      << stp << "\n";
+        }
     }
 
     double stmin_eval, stmax_eval;
@@ -569,7 +662,6 @@ int LbfgsSolver::mcsrch(int n,
         stmin_eval = stx_;
         stmax_eval = stp + xtrapf * (stp - stx_);
     }
-
     // Mirror the Fortran label-30 safeguards before requesting another f/g.
     stp = std::max(stp, stpmin_);
     stp = std::min(stp, stpmax_);

@@ -1,5 +1,9 @@
 #include "fce/principal.hpp"
 
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -21,7 +25,9 @@ double metric_norm(const Voigt3& C, const Vec2& v) {
 
 }  // namespace
 
-PrincipalResult compute_principal_curvature(const Voigt3& C_elem, const Voigt3& curv0_elem) {
+PrincipalResult compute_principal_curvature(const Voigt3& C_elem,
+                                            const Voigt3& curv0_elem,
+                                            const bool force_flag_num_diff) {
     PrincipalResult out;
 
     const double detC = C_elem[0] * C_elem[1] - C_elem[2] * C_elem[2];
@@ -44,14 +50,19 @@ PrincipalResult compute_principal_curvature(const Voigt3& C_elem, const Voigt3& 
 
     out.curvppal = Vec2{xmean + beta, xmean - beta};
 
-    if (std::abs(beta) < 1e-6) {
+    if (force_flag_num_diff || std::abs(beta) < 1e-6) {
         out.flag_num_diff = true;
-        out.vppal[0] = Vec2{C_elem[0], C_elem[2]};
-        out.vppal[1] = Vec2{-C_elem[2] * (C_elem[0] + C_elem[1]), C_elem[0] * C_elem[0] + C_elem[2] * C_elem[2]};
-        for (auto& v : out.vppal) {
-            const double fkk = metric_norm(C_elem, v);
-            v[0] /= fkk;
-            v[1] /= fkk;
+        out.vppal[0][0] = C_elem[0];
+        out.vppal[0][1] = C_elem[2];
+        out.vppal[1][0] = -C_elem[2] * (C_elem[0] + C_elem[1]);
+        out.vppal[1][1] = C_elem[0] * C_elem[0] + C_elem[2] * C_elem[2];
+        for (int ipp = 0; ipp < 2; ++ipp) {
+            const double fkk =
+                std::sqrt(C_elem[0] * out.vppal[ipp][0] * out.vppal[ipp][0] +
+                          2.0 * C_elem[2] * out.vppal[ipp][0] * out.vppal[ipp][1] +
+                          C_elem[1] * out.vppal[ipp][1] * out.vppal[ipp][1]);
+            out.vppal[ipp][0] = out.vppal[ipp][0] / fkk;
+            out.vppal[ipp][1] = out.vppal[ipp][1] / fkk;
         }
         return out;
     }
@@ -118,6 +129,10 @@ PrincipalResult compute_principal_curvature(const Voigt3& C_elem, const Voigt3& 
     }
 
     return out;
+}
+
+PrincipalResult compute_principal_curvature(const Voigt3& C_elem, const Voigt3& curv0_elem) {
+    return compute_principal_curvature(C_elem, curv0_elem, false);
 }
 
 }  // namespace fce

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <unordered_set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -245,6 +246,11 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     AssemblyResult result;
     result.force.assign(static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)), 0.0);
     result.eta_updates = zero_eta_field(input.mesh.numele, input.dims.ngauss);
+    const std::unordered_set<int> ghost_elements(input.mesh.elem_ghost.begin(),
+                                                 input.mesh.elem_ghost.end());
+    std::vector<long double> force_accum(result.force.size(), 0.0L);
+    long double total_energy_accum = 0.0L;
+    long double reduced_energy_accum = 0.0L;
 
     for (int ielem = element_begin; ielem < element_end; ++ielem) {
         const auto xneigh = gather_neighbor_patch(input.mesh, coords_with_ghosts, ielem);
@@ -273,7 +279,10 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
         result.eta_updates.at(static_cast<std::size_t>(ielem)) = elem.eta;
 
         const double scale = input.ref_config.at(static_cast<std::size_t>(ielem)).J0 / 2.0;
-        result.total_energy += elem.W_elem * scale;
+        total_energy_accum += static_cast<long double>(elem.W_elem) * static_cast<long double>(scale);
+        if (ghost_elements.find(ielem) == ghost_elements.end()) {
+            reduced_energy_accum += static_cast<long double>(elem.W_elem) * static_cast<long double>(scale);
+        }
         result.inner_fail += elem.inner_fail;
 
         const auto& connect = input.mesh.connect.at(static_cast<std::size_t>(ielem));
@@ -281,10 +290,16 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
             const int node_index = connect.neigh_vert[inode];
             const std::size_t base = static_cast<std::size_t>(3 * node_index);
             for (int axis = 0; axis < 3; ++axis) {
-                result.force[base + static_cast<std::size_t>(axis)] +=
-                    elem.f_elem[inode][axis] * scale;
+                force_accum[base + static_cast<std::size_t>(axis)] +=
+                    static_cast<long double>(elem.f_elem[inode][axis]) * static_cast<long double>(scale);
             }
         }
+    }
+
+    result.total_energy = static_cast<double>(total_energy_accum);
+    result.reduced_energy = static_cast<double>(reduced_energy_accum);
+    for (std::size_t i = 0; i < result.force.size(); ++i) {
+        result.force[i] = static_cast<double>(force_accum[i]);
     }
 
     fold_ghost_forces(result.force, input.mesh);
@@ -308,6 +323,7 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     auto local = assemble_energy_forces(input, state, owned.first, owned.second);
 
     local.total_energy = mpi.allreduce_sum(local.total_energy);
+    local.reduced_energy = mpi.allreduce_sum(local.reduced_energy);
     mpi.allreduce_sum(local.force);
 
     std::vector<double> fail_count{static_cast<double>(local.inner_fail)};

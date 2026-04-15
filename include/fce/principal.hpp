@@ -21,5 +21,8 @@ struct PrincipalResult {
 };
 
 PrincipalResult compute_principal_curvature(const Voigt3& C_elem, const Voigt3& curv0_elem);
+PrincipalResult compute_principal_curvature(const Voigt3& C_elem,
+                                            const Voigt3& curv0_elem,
+                                            bool force_flag_num_diff);
 
 }  // namespace fce

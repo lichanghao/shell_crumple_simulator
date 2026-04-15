@@ -33,3 +33,18 @@ draw. That means rerunning the instrumented capture on the same code path can pr
 trace. The committed `imperfection_trace_fortran.dat` should therefore be treated as a frozen,
 source-backed fixture captured from the Fortran runtime slot, not as a deterministically
 regenerable byproduct of an uninstrumented replay.
+
+## Test-contract consequence
+
+The archived `np1/` outputs and the replay-trace fixture are now treated as **separate oracle
+contracts**:
+
+- `np1/` remains the frozen archived output set captured from the original oracle run.
+- `imperfection_trace_fortran.dat` is a later frozen replay input captured from the runtime slot.
+
+Because those artifacts do not necessarily come from the same stochastic run, deterministic replay
+tests must not assume that `imperfection_trace_fortran.dat` reproduces the archived `np1/`
+step-1 monitor rows or VTU snapshot exactly. Replay-trace tests should instead compare against a
+committed replay-specific fixture (`replay_step1_monitor.dat`,
+`replay_step1_eval_sequence.dat`, `replay_step1_energy.dat`, `replay_step1_force.dat`), while
+archive-specific tests should stay tied to the frozen `np1/` outputs themselves.

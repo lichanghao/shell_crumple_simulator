@@ -13,6 +13,7 @@ This repository is a C++17 translation of the canonical Fortran graphene finite-
 - `test/cases/`: frozen Fortran fixtures and helper-generated oracle artifacts.
 - `document/fortran_conventions.md`: source-of-truth I/O, indexing, and unit conventions.
 - `document/translation_notes.md`: current translation status and known gaps.
+- `document/plan.md`: the entire project plan.
 
 ## Build
 

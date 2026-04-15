@@ -88,7 +88,8 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
                 // S_n: finite difference in C_elem direction i
                 Voigt3 C_p = state.C_elem;
                 C_p[i] += h;
-                const PrincipalResult pp_C = compute_principal_curvature(C_p, state.curv0_elem);
+                const PrincipalResult pp_C =
+                    compute_principal_curvature(C_p, state.curv0_elem, state.flag_num_diff);
                 const BondState bonds_C =
                     compute_deformed_bonds(C_p, pp_C.curvppal, pp_C.vppal, A_norm, Ei);
                 S_n[i] = (evaluate_outer_potential(mat, bonds_C.pe).W - W) / h;
@@ -98,7 +99,8 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
                 // is identical to the membrane-stress loop (both perturb C_elem).
                 Voigt3 C_pm = state.C_elem;
                 C_pm[i] += h;
-                const PrincipalResult pp_m = compute_principal_curvature(C_pm, state.curv0_elem);
+                const PrincipalResult pp_m =
+                    compute_principal_curvature(C_pm, state.curv0_elem, state.flag_num_diff);
                 const BondState bonds_m =
                     compute_deformed_bonds(C_pm, pp_m.curvppal, pp_m.vppal, A_norm, Ei);
                 S_m[i] = (evaluate_outer_potential(mat, bonds_m.pe).W - W) / h;
