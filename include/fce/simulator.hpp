@@ -16,6 +16,7 @@ struct SimulatorInput {
     Mesh mesh;
     std::vector<RefConfig> ref_config;
     io::ConfigData initial_config;
+    CreaseData crease;
     VdwData vdw;
     std::vector<double> imperfection_trace;
     BCData bcs;
@@ -25,6 +26,7 @@ struct SimulatorInput {
 struct RuntimeState {
     Coords coords{};
     EtaField eta{};
+    std::vector<std::vector<std::array<double, 3>>> K0_ref{};
 };
 
 struct AssemblyResult {

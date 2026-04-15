@@ -314,6 +314,157 @@ void write_config(const std::string& path, const ConfigData& c,
     }
 }
 
+// ─── nano_checkpoint.dat ──────────────────────────────────────────────────────
+
+CheckpointData read_checkpoint(const std::string& path,
+                               const int numnods,
+                               const int numele,
+                               const int ngauss,
+                               const bool has_crease_memory) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("Cannot open: " + path);
+    }
+
+    auto trim_line = [](const std::string& line) {
+        const auto begin = line.find_first_not_of(" \t\r\n");
+        if (begin == std::string::npos) {
+            return std::string{};
+        }
+        const auto end = line.find_last_not_of(" \t\r\n");
+        return line.substr(begin, end - begin + 1);
+    };
+
+    auto next_nonempty_line = [&](std::string& line) {
+        while (std::getline(in, line)) {
+            if (!trim_line(line).empty()) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    auto expect_label = [&](const std::string& expected) {
+        std::string line;
+        if (!next_nonempty_line(line) || trim_line(line) != expected) {
+            throw std::runtime_error("checkpoint label mismatch, expected: " + expected);
+        }
+    };
+
+    auto read_data_tokens = [&](const int expected_tokens, const std::string& what) {
+        std::string line;
+        if (!next_nonempty_line(line)) {
+            throw std::runtime_error("checkpoint is missing " + what);
+        }
+        const auto toks = tokenize(line);
+        if (static_cast<int>(toks.size()) < expected_tokens) {
+            throw std::runtime_error("checkpoint " + what + " has too few columns");
+        }
+        return toks;
+    };
+
+    CheckpointData checkpoint;
+    checkpoint.config.coords.resize(static_cast<std::size_t>(numnods));
+    checkpoint.config.eta.assign(static_cast<std::size_t>(numele),
+                                 std::vector<Vec2>(static_cast<std::size_t>(ngauss)));
+
+    expect_label("checkpoint_step");
+    checkpoint.iload = std::stoi(read_data_tokens(1, "checkpoint_step value").front());
+    expect_label("checkpoint_cycle");
+    checkpoint.icycle = std::stoi(read_data_tokens(1, "checkpoint_cycle value").front());
+    expect_label("Nodal positions");
+    for (int inode = 0; inode < numnods; ++inode) {
+        const auto toks = read_data_tokens(3, "nodal positions");
+        checkpoint.config.coords[static_cast<std::size_t>(inode)] = Vec3{
+            parse_fortran_double(toks[0]),
+            parse_fortran_double(toks[1]),
+            parse_fortran_double(toks[2]),
+        };
+    }
+
+    expect_label("Inner displacements");
+    for (int ielem = 0; ielem < numele; ++ielem) {
+        for (int igauss = 0; igauss < ngauss; ++igauss) {
+            const auto toks = read_data_tokens(2, "inner displacements");
+            checkpoint.config.eta[static_cast<std::size_t>(ielem)][static_cast<std::size_t>(igauss)] = Vec2{
+                parse_fortran_double(toks[0]),
+                parse_fortran_double(toks[1]),
+            };
+        }
+    }
+
+    if (!has_crease_memory) {
+        return checkpoint;
+    }
+
+    checkpoint.K0_ref.assign(static_cast<std::size_t>(numele),
+                             std::vector<std::array<double, 3>>(
+                                 static_cast<std::size_t>(ngauss),
+                                 std::array<double, 3>{0.0, 0.0, 0.0}));
+
+    std::string line;
+    if (!next_nonempty_line(line)) {
+        return checkpoint;
+    }
+    if (trim_line(line) != "K0_ref") {
+        return checkpoint;
+    }
+
+    for (int ielem = 0; ielem < numele; ++ielem) {
+        for (int igauss = 0; igauss < ngauss; ++igauss) {
+            const auto toks = read_data_tokens(3, "K0_ref");
+            checkpoint.K0_ref[static_cast<std::size_t>(ielem)][static_cast<std::size_t>(igauss)] = {
+                parse_fortran_double(toks[0]),
+                parse_fortran_double(toks[1]),
+                parse_fortran_double(toks[2]),
+            };
+        }
+    }
+
+    return checkpoint;
+}
+
+void write_checkpoint(const std::string& path,
+                      const CheckpointData& checkpoint,
+                      const int numnods,
+                      const int numele,
+                      const int ngauss,
+                      const bool has_crease_memory) {
+    std::ofstream out(path);
+    if (!out) {
+        throw std::runtime_error("Cannot write: " + path);
+    }
+
+    out << " checkpoint_step\n";
+    out << std::setw(12) << checkpoint.iload << "\n";
+    out << " checkpoint_cycle\n";
+    out << std::setw(12) << checkpoint.icycle << "\n";
+    out << " Nodal positions\n";
+    for (int inode = 0; inode < numnods; ++inode) {
+        const auto& p = checkpoint.config.coords.at(static_cast<std::size_t>(inode));
+        out << fmt_d(p[0]) << fmt_d(p[1]) << fmt_d(p[2]) << "\n";
+    }
+    out << " Inner displacements\n";
+    for (int ielem = 0; ielem < numele; ++ielem) {
+        for (int igauss = 0; igauss < ngauss; ++igauss) {
+            const auto& eta = checkpoint.config.eta.at(static_cast<std::size_t>(ielem))
+                                               .at(static_cast<std::size_t>(igauss));
+            out << fmt_d(eta[0]) << fmt_d(eta[1]) << "\n";
+        }
+    }
+    if (!has_crease_memory) {
+        return;
+    }
+    out << " K0_ref\n";
+    for (int ielem = 0; ielem < numele; ++ielem) {
+        for (int igauss = 0; igauss < ngauss; ++igauss) {
+            const auto& kappa = checkpoint.K0_ref.at(static_cast<std::size_t>(ielem))
+                                                 .at(static_cast<std::size_t>(igauss));
+            out << fmt_d(kappa[0]) << fmt_d(kappa[1]) << fmt_d(kappa[2]) << "\n";
+        }
+    }
+}
+
 // ─── nano_BCs.dat ─────────────────────────────────────────────────────────────
 
 // Trim leading/trailing whitespace from a line.

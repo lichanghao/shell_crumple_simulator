@@ -70,6 +70,27 @@ ConfigData read_config(const std::string& path, int numnods, int numele, int nga
 void       write_config(const std::string& path, const ConfigData& c,
                         int numnods, int numele, int ngauss);
 
+// ─── nano_checkpoint.dat ──────────────────────────────────────────────────────
+
+struct CheckpointData {
+    int iload{0};
+    int icycle{0};
+    ConfigData config{};
+    std::vector<std::vector<std::array<double, 3>>> K0_ref{};
+};
+
+CheckpointData read_checkpoint(const std::string& path,
+                               int numnods,
+                               int numele,
+                               int ngauss,
+                               bool has_crease_memory);
+void           write_checkpoint(const std::string& path,
+                                const CheckpointData& checkpoint,
+                                int numnods,
+                                int numele,
+                                int ngauss,
+                                bool has_crease_memory);
+
 // ─── nano_BCs.dat ─────────────────────────────────────────────────────────────
 
 BCData read_bcs(const std::string& path);

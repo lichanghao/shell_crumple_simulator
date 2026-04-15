@@ -14,6 +14,7 @@
 
 static const std::string kPrepro = std::string(ORACLE_DIR) + "/graphene_compression_prepro/";
 static const std::string kSelfContact = std::string(ORACLE_DIR) + "/graphene_self_contact/prepro_run/";
+static const std::string kCyclicSim = std::string(ORACLE_DIR) + "/graphene_cyclic_crumple/simulator_run/";
 static const std::string kTmp    = "/tmp/fce_test_";
 
 static bool near_rel(double a, double b, double rtol = 1e-10, double atol = 1e-12) {
@@ -105,6 +106,36 @@ TEST(RoundTrip, Config) {
         for (int ig = 0; ig < 2; ++ig)
             for (int d = 0; d < 2; ++d)
                 EXPECT_NEAR(c1.eta[ie][ig][d], c2.eta[ie][ig][d], 1e-14) << "ie=" << ie;
+}
+
+TEST(RoundTrip, Checkpoint) {
+    auto c1 = fce::io::read_checkpoint(kCyclicSim + "nano_checkpoint.dat",
+                                       1681,
+                                       3200,
+                                       2,
+                                       /*has_crease_memory=*/false);
+    std::string tmp = kTmp + "checkpoint.dat";
+    fce::io::write_checkpoint(tmp, c1, 1681, 3200, 2, /*has_crease_memory=*/false);
+    auto c2 = fce::io::read_checkpoint(tmp, 1681, 3200, 2, /*has_crease_memory=*/false);
+
+    EXPECT_EQ(c1.iload, c2.iload);
+    EXPECT_EQ(c1.icycle, c2.icycle);
+    ASSERT_EQ(c1.config.coords.size(), c2.config.coords.size());
+    ASSERT_EQ(c1.config.eta.size(), c2.config.eta.size());
+    for (std::size_t inode = 0; inode < c1.config.coords.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(c1.config.coords[inode][axis], c2.config.coords[inode][axis], 1e-12)
+                << "inode=" << inode << " axis=" << axis;
+        }
+    }
+    for (std::size_t ielem = 0; ielem < c1.config.eta.size(); ++ielem) {
+        for (std::size_t igauss = 0; igauss < c1.config.eta[ielem].size(); ++igauss) {
+            for (int axis = 0; axis < 2; ++axis) {
+                EXPECT_NEAR(c1.config.eta[ielem][igauss][axis], c2.config.eta[ielem][igauss][axis], 1e-12)
+                    << "ielem=" << ielem << " igauss=" << igauss << " axis=" << axis;
+            }
+        }
+    }
 }
 
 // ─── Round-trip: nano_BCs.dat ─────────────────────────────────────────────────

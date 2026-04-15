@@ -13,6 +13,7 @@
 
 static const std::string kPrepro = std::string(ORACLE_DIR) + "/graphene_compression_prepro/";
 static const std::string kSelfContact = std::string(ORACLE_DIR) + "/graphene_self_contact/prepro_run/";
+static const std::string kCyclicSim = std::string(ORACLE_DIR) + "/graphene_cyclic_crumple/simulator_run/";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,26 @@ TEST(ReadConfig, GrapheneCompression) {
     // All η initially zero
     EXPECT_NEAR(c.eta[0][0][0], 0.0, 1e-15);
     EXPECT_NEAR(c.eta[0][0][1], 0.0, 1e-15);
+}
+
+TEST(ReadCheckpoint, GrapheneCyclicCrumple) {
+    auto checkpoint = fce::io::read_checkpoint(kCyclicSim + "nano_checkpoint.dat",
+                                               1681,
+                                               3200,
+                                               2,
+                                               /*has_crease_memory=*/false);
+    EXPECT_EQ(checkpoint.iload, 200);
+    EXPECT_EQ(checkpoint.icycle, 5);
+    ASSERT_EQ(static_cast<int>(checkpoint.config.coords.size()), 1681);
+    ASSERT_EQ(static_cast<int>(checkpoint.config.eta.size()), 3200);
+    ASSERT_EQ(static_cast<int>(checkpoint.config.eta[0].size()), 2);
+    EXPECT_NEAR(checkpoint.config.coords[0][0], 0.0, 1e-15);
+    EXPECT_NEAR(checkpoint.config.coords[0][1], 0.0, 1e-15);
+    EXPECT_NEAR(checkpoint.config.coords[0][2], 0.0, 1e-15);
+    EXPECT_NEAR(checkpoint.config.coords[1][0], 5.0014290770334624e-1, 1e-15);
+    EXPECT_NEAR(checkpoint.config.coords[1][1], 5.7573756533081263e-5, 1e-18);
+    EXPECT_NEAR(checkpoint.config.coords[1][2], -5.2338478808536719e-3, 1e-18);
+    EXPECT_TRUE(checkpoint.K0_ref.empty());
 }
 
 // ─── nano_BCs.dat ─────────────────────────────────────────────────────────────

@@ -153,6 +153,17 @@ SimulatorInput load_simulator_input(const std::string& case_dir) {
                                            input.dims.numnods,
                                            input.dims.numele,
                                            input.dims.ngauss);
+    if (std::filesystem::exists(base / "nano_crease.dat")) {
+        input.crease = io::read_crease((base / "nano_crease.dat").string(),
+                                       input.dims.numnods,
+                                       input.dims.ngauss);
+        if (input.crease.ncrease == 1) {
+            input.crease.K0_ref.assign(static_cast<std::size_t>(input.dims.numele),
+                                       std::vector<std::array<double, 3>>(
+                                           static_cast<std::size_t>(input.dims.ngauss),
+                                           std::array<double, 3>{0.0, 0.0, 0.0}));
+        }
+    }
     if (std::filesystem::exists(base / "nano_vdw.dat")) {
         input.vdw = io::read_vdw((base / "nano_vdw.dat").string(),
                                  input.dims.ng_tot,
@@ -185,6 +196,7 @@ RuntimeState make_runtime_state(const SimulatorInput& input) {
     return RuntimeState{
         input.initial_config.coords,
         input.initial_config.eta,
+        input.crease.K0_ref,
     };
 }
 

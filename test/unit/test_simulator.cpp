@@ -32,6 +32,10 @@ fs::path bilayer_nwhat_case_dir() {
     return fs::path(ORACLE_DIR) / "graphene_bilayer_twist_vdw_1000" / "prepro_run";
 }
 
+fs::path cyclic_prepro_case_dir() {
+    return fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "prepro_run";
+}
+
 std::vector<double> read_archived_step_energies(const fs::path& energy_path) {
     std::ifstream in(energy_path);
     if (!in) {
@@ -217,4 +221,23 @@ TEST(SimulatorAssembly, StatefulAssemblyUsesRuntimeEtaInsteadOfInitialConfig) {
     EXPECT_NEAR(result.eta_updates.at(0).at(0)[1], seeded_eta[1], 1e-15);
     EXPECT_NEAR(state.eta.at(0).at(0)[0], seeded_eta[0], 1e-15);
     EXPECT_NEAR(state.eta.at(0).at(0)[1], seeded_eta[1], 1e-15);
+}
+
+TEST(SimulatorInput, CyclicCaseLoadsCreaseMetadataIntoRuntimeState) {
+    const auto input = fce::load_simulator_input(cyclic_prepro_case_dir().string());
+    ASSERT_EQ(input.crease.ncrease, 1);
+    EXPECT_GT(input.crease.kappa_cr, 0.0);
+    EXPECT_GE(input.crease.alpha_lock, 0.0);
+    ASSERT_EQ(input.crease.K0_ref.size(), static_cast<std::size_t>(input.mesh.numele));
+    ASSERT_EQ(input.crease.K0_ref.front().size(), static_cast<std::size_t>(input.dims.ngauss));
+    EXPECT_DOUBLE_EQ(input.crease.K0_ref.front().front()[0], 0.0);
+    EXPECT_DOUBLE_EQ(input.crease.K0_ref.front().front()[1], 0.0);
+    EXPECT_DOUBLE_EQ(input.crease.K0_ref.front().front()[2], 0.0);
+
+    const auto state = fce::make_runtime_state(input);
+    ASSERT_EQ(state.K0_ref.size(), input.crease.K0_ref.size());
+    ASSERT_EQ(state.K0_ref.front().size(), input.crease.K0_ref.front().size());
+    EXPECT_DOUBLE_EQ(state.K0_ref.front().front()[0], 0.0);
+    EXPECT_DOUBLE_EQ(state.K0_ref.front().front()[1], 0.0);
+    EXPECT_DOUBLE_EQ(state.K0_ref.front().front()[2], 0.0);
 }
