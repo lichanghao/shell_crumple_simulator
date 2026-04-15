@@ -44,6 +44,8 @@ const fs::path kCyclicReplayStepOneEnergyFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_energy.dat";
 const fs::path kCyclicReplayStepOneForceFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_force.dat";
+const fs::path kCyclicPostMinimizeFreeFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "post_minimize_free_coords.dat";
 const fs::path kSelfContactCaseDir =
     fs::path(kOracleDir) / "graphene_self_contact" / "prepro_run";
 const fs::path kXmlValidatorScript =
@@ -1431,6 +1433,32 @@ TEST(CompressionCaseFiles, ArchivedAndReplayCyclicStepOneRowsAreDistinctContract
                              fce::io::parse_fortran_double(replay_force_tokens[3]),
                              1e-12),
               1e-3);
+}
+
+TEST_F(E2ECyclicRuntime, CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOracle) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicPostMinimizeFreeFixture)) << "Missing cyclic post-free fixture";
+
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const auto dims = fce::io::read_dims((temp_case_dir_ / "nano_dims.dat").string());
+    const auto actual = read_vtu_points(temp_case_dir_ / "mesh_config_0000.vtu", dims.numnods);
+    const auto oracle = read_fortran_coord_dump(kCyclicPostMinimizeFreeFixture);
+
+    ASSERT_EQ(actual.size(), oracle.size());
+    double max_abs = 0.0;
+    for (std::size_t inode = 0; inode < actual.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            max_abs = std::max(max_abs,
+                               std::abs(actual[inode][axis] - oracle[inode][axis]));
+        }
+    }
+    EXPECT_LE(max_abs, 1e-6);
 }
 
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {

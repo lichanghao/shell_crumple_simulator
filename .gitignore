@@ -54,6 +54,7 @@ test/cases/graphene_cyclic_crumple/*
 !test/cases/graphene_cyclic_crumple/replay_step1_trace.dat
 !test/cases/graphene_cyclic_crumple/replay_step1_energy.dat
 !test/cases/graphene_cyclic_crumple/replay_step1_force.dat
+!test/cases/graphene_cyclic_crumple/post_minimize_free_coords.dat
 document/*
 build/*
 

@@ -62,6 +62,9 @@ Preprocessor and simulator reference outputs for the cyclic crumpling case.
   200-step imperfection trace whose first value was captured from an instrumented Fortran
   `pasapas.f90` run and whose remaining values are neutral placeholders because the current
   replay contract only covers load step 1.
+- Deterministic post-free oracle: `graphene_cyclic_crumple/post_minimize_free_coords.dat`
+  records the source-backed node coordinates immediately after `minimize_free` and before the
+  first cyclic load increment in the same instrumented Fortran replay lane.
 - Deterministic replay output rows: `graphene_cyclic_crumple/replay_step1_energy.dat` and
   `graphene_cyclic_crumple/replay_step1_force.dat` capture the first cyclic load row from the
   same instrumented Fortran replay and serve as the executable-path replay oracle for step 1.
