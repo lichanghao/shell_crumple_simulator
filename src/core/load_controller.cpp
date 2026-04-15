@@ -83,15 +83,15 @@ void LoadController::apply_increment(int iload, Coords& coords) {
                 continue;
             }
 
-            if (side_tag == 1) {
+            if (side_tag == 0) {
                 continue;
             }
-            if (side_tag == 2 || side_tag == 3) {
-                const int axis = side_tag - 2;
+            if (side_tag == 1 || side_tag == 2) {
+                const int axis = side_tag - 1;
                 x0_bc_.at(static_cast<std::size_t>(3 * inod + axis)) += sign * dl;
                 continue;
             }
-            if (side_tag == 4) {
+            if (side_tag == 3) {
                 x0_bc_.at(static_cast<std::size_t>(3 * inod)) += sign * dl;
                 x0_bc_.at(static_cast<std::size_t>(3 * inod + 1)) += sign * dl;
             }

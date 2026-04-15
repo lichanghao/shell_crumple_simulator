@@ -38,6 +38,12 @@ const fs::path kCaseDir =
     fs::path(kOracleDir) / "graphene_compression_simulator" / "np1";
 const fs::path kCyclicCaseDir =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "prepro_run";
+const fs::path kCyclicReplayTraceFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_trace.dat";
+const fs::path kCyclicReplayStepOneEnergyFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_energy.dat";
+const fs::path kCyclicReplayStepOneForceFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_force.dat";
 const fs::path kSelfContactCaseDir =
     fs::path(kOracleDir) / "graphene_self_contact" / "prepro_run";
 const fs::path kXmlValidatorScript =
@@ -1363,13 +1369,20 @@ TEST_F(E2ECompression, CrunchItStepOneRowsMatchCommittedReplayFixture) {
     }
 }
 
-TEST_F(E2ECyclicRuntime, CrunchItRunsFirstCyclicStepAndWritesCyclicRowFormat) {
+TEST_F(E2ECyclicRuntime, CrunchItReplaysCommittedCyclicStepOneTraceDeterministically) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
 
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
 
     const auto energy_tokens = last_data_tokens(temp_case_dir_ / "energy.dat");
     const auto force_tokens = last_data_tokens(temp_case_dir_ / "force.dat");
+    const std::string energy_first = read_file(temp_case_dir_ / "energy.dat");
+    const std::string force_first = read_file(temp_case_dir_ / "force.dat");
 
     ASSERT_GE(energy_tokens.size(), 8U);
     ASSERT_GE(force_tokens.size(), 5U);
@@ -1379,10 +1392,45 @@ TEST_F(E2ECyclicRuntime, CrunchItRunsFirstCyclicStepAndWritesCyclicRowFormat) {
     EXPECT_EQ(force_tokens[0], "1");
     EXPECT_EQ(force_tokens[1], "1");
     EXPECT_EQ(force_tokens[2], "1");
-    EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(energy_tokens[3])));
-    EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(force_tokens[3])));
+    for (std::size_t col = 3; col < energy_tokens.size(); ++col) {
+        EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(energy_tokens[col])))
+            << "energy col " << col;
+    }
+    for (std::size_t col = 3; col < force_tokens.size(); ++col) {
+        EXPECT_TRUE(std::isfinite(fce::io::parse_fortran_double(force_tokens[col])))
+            << "force col " << col;
+    }
     EXPECT_TRUE(fs::exists(temp_case_dir_ / "mesh_config_0001.vtu"));
     EXPECT_FALSE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
+
+    remove_runtime_outputs(temp_case_dir_);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+    EXPECT_EQ(read_file(temp_case_dir_ / "energy.dat"), energy_first);
+    EXPECT_EQ(read_file(temp_case_dir_ / "force.dat"), force_first);
+}
+
+TEST(CompressionCaseFiles, ArchivedAndReplayCyclicStepOneRowsAreDistinctContracts) {
+    const auto archived_energy_tokens =
+        last_data_tokens(fs::path(kOracleDir) / "graphene_cyclic_crumple" / "simulator_run" / "energy.dat");
+    const auto replay_energy_tokens = last_data_tokens(kCyclicReplayStepOneEnergyFixture);
+    const auto archived_force_tokens =
+        last_data_tokens(fs::path(kOracleDir) / "graphene_cyclic_crumple" / "simulator_run" / "force.dat");
+    const auto replay_force_tokens = last_data_tokens(kCyclicReplayStepOneForceFixture);
+
+    ASSERT_EQ(archived_energy_tokens.size(), replay_energy_tokens.size());
+    ASSERT_EQ(archived_force_tokens.size(), replay_force_tokens.size());
+
+    EXPECT_GT(relative_error(fce::io::parse_fortran_double(archived_energy_tokens[3]),
+                             fce::io::parse_fortran_double(replay_energy_tokens[3]),
+                             1e-12),
+              1e-4);
+    EXPECT_GT(relative_error(fce::io::parse_fortran_double(archived_force_tokens[3]),
+                             fce::io::parse_fortran_double(replay_force_tokens[3]),
+                             1e-12),
+              1e-3);
 }
 
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {

@@ -58,8 +58,19 @@ Preprocessor and simulator reference outputs for the cyclic crumpling case.
 - Input: `prepro_run/data.dat` — 40×40 mesh, 20nm×20nm, nCodeLoad=31 (biaxial cyclic),
   5 cycles, nloadstep_comp=20, nloadstep_rel=20, ncrease=1
 - Preprocessor outputs: `prepro_run/nano_*.dat`, `prepro_run/ghost_coords.dat`, `prepro_run/prepro.log`
+- Deterministic replay trace: `graphene_cyclic_crumple/replay_step1_trace.dat` is a frozen
+  200-step imperfection trace whose first value was captured from an instrumented Fortran
+  `pasapas.f90` run and whose remaining values are neutral placeholders because the current
+  replay contract only covers load step 1.
+- Deterministic replay output rows: `graphene_cyclic_crumple/replay_step1_energy.dat` and
+  `graphene_cyclic_crumple/replay_step1_force.dat` capture the first cyclic load row from the
+  same instrumented Fortran replay and serve as the executable-path replay oracle for step 1.
 - Simulator outputs: `energy.dat`, `force.dat`, `crease_map.dat`, `nano_final_config.dat`,
   `output.dat`, `nano_checkpoint.dat`
+- Important caveat: the archived cyclic `simulator_run/energy.dat` and `force.dat` step-one rows
+  are a different stochastic contract from the replay fixtures above. The cyclic runtime still
+  draws a fresh imperfection scalar every load step, so deterministic replay tests must compare
+  against the replay fixtures, not directly against the archived stochastic row.
 
 ### graphene_self_contact/
 Preprocessor reference outputs for the single-sheet self-contact cyclic case.
