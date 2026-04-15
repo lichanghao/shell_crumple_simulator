@@ -903,6 +903,42 @@ TEST_F(E2ECompression, CrunchItStepOneVtuSnapshotMatchesArchivedOracle) {
                                1e-6);
 }
 
+TEST_F(E2ECompression, CrunchItStepOnePreservesArchivedBcNodeGeometry) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
+
+    install_replay_trace(temp_case_dir_, kFortranTraceFixture);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
+    const auto bcs = fce::io::read_bcs((kCaseDir / "nano_BCs.dat").string());
+    const auto generated_points = read_vtu_points(temp_case_dir_ / "mesh_config_0001.vtu", dims.numnods);
+    const auto oracle_points = read_vtu_points(kCaseDir / "mesh_config_0001.vtu", dims.numnods);
+
+    std::vector<bool> bc_nodes(static_cast<std::size_t>(dims.numnods), false);
+    for (const auto& tag : bcs.mnodBC) {
+        bc_nodes.at(static_cast<std::size_t>(tag[0])) = true;
+    }
+
+    double max_bc_delta = 0.0;
+    double max_free_delta = 0.0;
+    for (int node = 0; node < dims.numnods; ++node) {
+        for (int axis = 0; axis < 3; ++axis) {
+            const double delta = std::abs(
+                generated_points[static_cast<std::size_t>(node)][axis] -
+                oracle_points[static_cast<std::size_t>(node)][axis]);
+            if (bc_nodes.at(static_cast<std::size_t>(node))) {
+                max_bc_delta = std::max(max_bc_delta, delta);
+            } else {
+                max_free_delta = std::max(max_free_delta, delta);
+            }
+        }
+    }
+
+    EXPECT_LE(max_bc_delta, 1e-12);
+    EXPECT_GT(max_free_delta, 1e-6);
+}
+
 TEST(CompressionCaseFiles, ArchivedStepOneVtuMatchesArchivedEnergyAndReactionRows) {
     const auto input = fce::load_simulator_input(kCaseDir.string());
     auto state = replay_state_from_oracle_vtu(kCaseDir / "mesh_config_0001.vtu", input);
