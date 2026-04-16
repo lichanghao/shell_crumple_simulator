@@ -1622,7 +1622,7 @@ TEST_F(E2ECompression, CrunchItReusesRecordedImperfectionTraceDeterministically)
     EXPECT_EQ(read_file(temp_case_dir_ / "nano_final_config.dat"), final_first);
 }
 
-TEST_F(E2ECompression, CrunchItRejectsShortImperfectionTrace) {
+TEST_F(E2ECompression, CrunchItAcceptsStepBoundedImperfectionTrace) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
 
     {
@@ -1633,5 +1633,28 @@ TEST_F(E2ECompression, CrunchItRejectsShortImperfectionTrace) {
 
     const std::string command =
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
+
+    ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
+    const std::string energy_first = read_file(temp_case_dir_ / "energy.dat");
+    const std::string force_first = read_file(temp_case_dir_ / "force.dat");
+
+    remove_runtime_outputs(temp_case_dir_);
+
+    ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
+    EXPECT_EQ(read_file(temp_case_dir_ / "energy.dat"), energy_first);
+    EXPECT_EQ(read_file(temp_case_dir_ / "force.dat"), force_first);
+}
+
+TEST_F(E2ECompression, CrunchItRejectsImperfectionTraceShorterThanRequestedStopStep) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    {
+        std::ofstream out(temp_case_dir_ / "imperfection_trace.dat", std::ios::out | std::ios::trunc);
+        ASSERT_TRUE(out.good());
+        out << std::setprecision(17) << 0.125 << "\n";
+    }
+
+    const std::string command =
+        shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 2";
     EXPECT_NE(std::system(command.c_str()), 0) << "Expected short imperfection trace to be rejected";
 }

@@ -213,6 +213,13 @@ int main(int argc, char** argv) {
                 }
             }
 
+            const int final_stop_step = requested_stop_step.value_or(input.bcs.nloadstep);
+            if (input.general.imperfect &&
+                !input.imperfection_trace.empty() &&
+                static_cast<int>(input.imperfection_trace.size()) < final_stop_step) {
+                throw std::runtime_error("imperfection trace is shorter than the requested stop step");
+            }
+
             const double eps = input.general.crit_global > 0.0 ? input.general.crit_global : 1.0e-8;
             fce::pasapas(input,
                          state,
@@ -220,7 +227,7 @@ int main(int argc, char** argv) {
                          case_dir,
                          eps,
                          iload_start,
-                         requested_stop_step.value_or(input.bcs.nloadstep));
+                         final_stop_step);
         }
     } catch (const std::exception& e) {
         std::cerr << "ERROR: " << e.what() << "\n";

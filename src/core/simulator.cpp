@@ -183,12 +183,6 @@ SimulatorInput load_simulator_input(const std::string& case_dir) {
     if (static_cast<int>(input.initial_config.eta.size()) != input.mesh.numele) {
         throw std::runtime_error("initial eta field size does not match mesh.numele");
     }
-    if (input.general.imperfect &&
-        !input.imperfection_trace.empty() &&
-        static_cast<int>(input.imperfection_trace.size()) < input.bcs.nloadstep) {
-        throw std::runtime_error("imperfection trace is shorter than BCs%nloadstep");
-    }
-
     return input;
 }
 
