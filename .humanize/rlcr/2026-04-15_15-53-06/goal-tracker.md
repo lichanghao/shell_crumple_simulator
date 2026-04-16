@@ -39,7 +39,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 ## MUTABLE SECTION
 <!-- Update each round with justification for changes -->
 
-### Plan Version: 1 (Updated: Round 8, 2026-04-16)
+### Plan Version: 1 (Updated: Round 9, 2026-04-16)
 
 #### Plan Evolution Log
 | Round | Change | Reason | Impact on AC |
@@ -54,6 +54,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | 4 | Converted the cyclic replay lane from a determinism smoke check into an enforced numeric replay-row gate | `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` now compares the emitted step-one `energy.dat` and `force.dat` rows against committed replay fixtures, making the remaining cyclic step-one mismatch an explicit red gate instead of a format-only smoke test | AC-9, AC-10, AC-13 |
 | 6 | Matched the cyclic post-`minimize_free` handoff to the committed Fortran oracle by mirroring the free-minimize first-trial exit behavior | The shared cyclic blocker is no longer upstream of `LoadController`; the active remaining gap is now the first constrained replay row, especially `GNORM` and reaction output | AC-7, AC-9, AC-10, AC-13 |
 | 8 | Refreshed the `task8c` note after the Round 8 documentation update | `document/translation_notes.md` no longer reports the pre-Round-6 cyclic post-free mismatch, so the tracker should stop treating that stale note as the active AC-13 blocker | AC-13 |
+| 9 | Extended checkpoint semantics with writing-rank metadata and moved cyclic restart restore to rank-0 read plus MPI broadcast | The executable path now distinguishes legacy checkpoints from new rank-aware files, restores `coords` / `eta` / `K0_ref` consistently across ranks, and records the writing MPI size for future compatibility checks | AC-10, AC-11, AC-13 |
 
 #### Active Tasks
 | Task | Target AC | Status | Tag | Owner | Notes |
@@ -69,10 +70,10 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | task7a: Cyclic BC controller `nCodeLoad=30/31` | AC-9 | in_progress | coding | claude | The committed gate `E2ECyclicRuntime.CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOracle` is now green after the free-minimize handoff fix. The remaining cyclic blocker is downstream in the first constrained replay row and reaction output rather than the shared post-`minimize_free` state. |
 | task7b: Irreversible crease memory | AC-9 | pending | coding | claude | Not started on the executable path. |
 | task7c: Crease detection and facet analysis | AC-9 | pending | coding | claude | Not started on the executable path. |
-| task7d: Checkpoint/restart | AC-10 | in_progress | coding | claude | `crunch_it` now ingests `nano_checkpoint.dat` for cyclic runs, restores `coords`/`eta`/`K0_ref`, resumes from `checkpoint.iload + 1`, and writes checkpoints at end-of-cycle boundaries. MPI broadcast, rank-mismatch validation, and uninterrupted-vs-restarted parity are still missing. |
+| task7d: Checkpoint/restart | AC-10 | in_progress | coding | claude | `crunch_it` now ingests `nano_checkpoint.dat` for cyclic runs on rank 0, broadcasts restored `coords` / `eta` / `K0_ref`, resumes from `checkpoint.iload + 1`, writes `checkpoint_nprocs` at end-of-cycle boundaries, and rejects stored rank mismatches when the field is present. Uninterrupted-vs-restarted parity is still missing, and the multi-rank rank-mismatch failure path still needs coordinated handling and coverage. |
 | task7e: Oracle tests for cyclic case and checkpoint | AC-9, AC-10 | pending | coding | claude | The cyclic post-free gate is now green, but `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` still fails on the committed replay rows with relative errors about `0.000341`, `0.04080`, `8.2862`, and `0.1554`. Restart parity and incompatible-rank failure coverage are still missing. |
 | task8a: Multi-rank consistency tests `np=1,2,4` | AC-11 | pending | coding | claude | Assembly groundwork exists, but acceptance-level MPI parity is still open. |
-| task8b: Checkpoint compatibility across rank counts | AC-10, AC-11 | pending | coding | claude | Depends on checkpoint implementation. |
+| task8b: Checkpoint compatibility across rank counts | AC-10, AC-11 | pending | coding | claude | Checkpoints now record `checkpoint_nprocs`, but cross-rank restart acceptance coverage and coordinated mismatch handling are still missing. |
 | task8c: `AGENT.md` and `document/translation_notes.md` finalization | AC-13 | in_progress | coding | claude | `document/translation_notes.md` is refreshed for the current cyclic post-free status, but AC-13 cannot close until the remaining AC-7, AC-8, AC-9, AC-10, and AC-11 runtime gaps are resolved and the final verification evidence is recorded. |
 | task8d: Full integration test suite | AC-1 through AC-13 | pending | analyze | codex | The full integration surface still contains red archived-runtime gates and timing issues; rerun only after the current AC-7 executable-path blocker materially changes. |
 
@@ -118,5 +119,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | The committed cyclic replay-row gate is now numerically enforced and still fails on the first positive-load rows: `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` reports relative errors about `0.000341` and `0.04080` in `energy.dat`/`GNORM`, and about `8.2862` / `0.1554` in `force.dat`. | 4 | AC-9, AC-10 | Keep the replay-row gate red until the downstream constrained-step and reaction output match the committed replay fixtures, then add restart parity and incompatible-rank coverage. |
 | Archived `mesh_config_0000.vtu` is a pre-`pasapas()` artifact, so step-0 VTU parity cannot prove the hidden post-free state matches Fortran. | 1 | AC-7 | Continue using direct hidden-state comparisons or pre-step-1 dumps rather than archived step-0 geometry parity as a physical oracle. |
 | Runtime vdW/self-contact remains unimplemented even though preprocessor-side `nvdw=1` parity is complete. | 3 | AC-8 | Translate the simulator-side `vdw_modules.f90` path and add runtime oracle coverage. |
+| The full `unit_tests` binary still fails `ElementEnergy.FlagNumDiffStressesMatchFortranOracle` and `ElementEnergy.BrennerMaterialMatchesFortranOracle`, so the tracker is overstating how clean the constitutive / element-energy surface currently is. | 9 | AC-7, AC-13 | Either fix the failing oracle-backed element-energy paths or reopen the affected verification claims so the tracker and docs stop implying the kernel surface is fully green. |
+| The new root-only checkpoint rank-mismatch throw can deadlock a multi-rank restart because non-root ranks still enter the broadcast path while rank 0 exits early. | 9 | AC-10, AC-11 | Turn checkpoint restore into a coordinated status/error broadcast before any rank throws, then add a multi-rank incompatible-checkpoint regression test. |
 | The repository still lacks an executable-path real-`nvdw=1` VTU/PVD oracle series. | 40 | AC-12, AC-8 | Add a real runtime `nvdw=1` executable-path case and compare VTU/PVD payloads end to end. |
 | The archived-oracle executable-path compression test still does not complete within the current `ctest` budget. | 42 | AC-7, AC-13 | First close the archived step-one runtime mismatch so the runtime follows the archived trajectory, then finish the 50-step run within the existing budget. |
