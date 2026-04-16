@@ -88,22 +88,26 @@ int main(int argc, char** argv) {
                 int checkpoint_status = 0;
                 int checkpoint_nprocs = 0;
                 if (mpi.is_root() && std::filesystem::exists(checkpoint_path)) {
-                    const auto checkpoint = fce::io::read_checkpoint(checkpoint_path.string(),
-                                                                     input.mesh.numnods,
-                                                                     input.mesh.numele,
-                                                                     input.dims.ngauss,
-                                                                     input.crease.ncrease == 1);
-                    checkpoint_nprocs = checkpoint.nprocs;
-                    if (checkpoint.nprocs > 0 && checkpoint.nprocs != mpi.size()) {
-                        checkpoint_status = -1;
-                    } else {
-                        state.coords = checkpoint.config.coords;
-                        state.eta = checkpoint.config.eta;
-                        if (!checkpoint.K0_ref.empty()) {
-                            state.K0_ref = checkpoint.K0_ref;
+                    try {
+                        const auto checkpoint = fce::io::read_checkpoint(checkpoint_path.string(),
+                                                                         input.mesh.numnods,
+                                                                         input.mesh.numele,
+                                                                         input.dims.ngauss,
+                                                                         input.crease.ncrease == 1);
+                        checkpoint_nprocs = checkpoint.nprocs;
+                        if (checkpoint.nprocs > 0 && checkpoint.nprocs != mpi.size()) {
+                            checkpoint_status = -1;
+                        } else {
+                            state.coords = checkpoint.config.coords;
+                            state.eta = checkpoint.config.eta;
+                            if (!checkpoint.K0_ref.empty()) {
+                                state.K0_ref = checkpoint.K0_ref;
+                            }
+                            iload_start = checkpoint.iload + 1;
+                            checkpoint_found = 1;
                         }
-                        iload_start = checkpoint.iload + 1;
-                        checkpoint_found = 1;
+                    } catch (const std::exception&) {
+                        checkpoint_status = -2;
                     }
                 }
 
@@ -120,6 +124,9 @@ int main(int argc, char** argv) {
                 checkpoint_nprocs = meta[3];
 
                 if (checkpoint_status < 0) {
+                    if (checkpoint_status == -2) {
+                        throw std::runtime_error("failed to read checkpoint");
+                    }
                     throw std::runtime_error("checkpoint rank count mismatch: file was written with " +
                                              std::to_string(checkpoint_nprocs) +
                                              " ranks, current run uses " +

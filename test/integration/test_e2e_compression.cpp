@@ -1508,6 +1508,32 @@ TEST_F(E2ECyclicRuntime, CrunchItRejectsCheckpointWrittenWithDifferentRankCount)
     EXPECT_NE(output.find("checkpoint rank count mismatch"), std::string::npos);
 }
 
+TEST_F(E2ECyclicRuntime, CrunchItRejectsMalformedCheckpointAcrossRanks) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    {
+        std::ofstream out(temp_case_dir_ / "nano_checkpoint.dat", std::ios::out | std::ios::trunc);
+        ASSERT_TRUE(out.is_open());
+        out << " checkpoint_step\n";
+        out << "           1\n";
+        out << " checkpoint_cycle\n";
+        out << "           1\n";
+        out << " checkpoint_nprocs\n";
+        out << "           2\n";
+        out << " Nodal positions\n";
+        out << " malformed\n";
+    }
+
+    const fs::path stderr_path = temp_case_dir_.parent_path() / "malformed_checkpoint.log";
+    const std::string command =
+        "mpirun -np 2 " + shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1" +
+        " > " + shell_quote(stderr_path) + " 2>&1";
+
+    ASSERT_NE(std::system(command.c_str()), 0);
+    const std::string output = read_file(stderr_path);
+    EXPECT_NE(output.find("failed to read checkpoint"), std::string::npos);
+}
+
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
     const auto input = fce::load_simulator_input(temp_case_dir_.string());
     const std::array<int, 3> replay_steps{1, 25, 50};
