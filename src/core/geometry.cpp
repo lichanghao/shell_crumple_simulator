@@ -43,6 +43,17 @@ Voigt3 pull_back(const Voigt3& source, const Mat22& f0) {
 MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient12& dn, const Mat22& f0) {
     MetricResult out;
     std::array<Vec3, 2> g_convect{};
+    const double f00 = f0[0][0];
+    const double f01 = f0[0][1];
+    const double f10 = f0[1][0];
+    const double f11 = f0[1][1];
+    const double f00_sq = f00 * f00;
+    const double f01_sq = f01 * f01;
+    const double f10_sq = f10 * f10;
+    const double f11_sq = f11 * f11;
+    const double f00f10_twice = 2.0 * f00 * f10;
+    const double f01f11_twice = 2.0 * f01 * f11;
+    const double shear_coeff = f00 * f11 + f01 * f10;
 
     for (int idir = 0; idir < 2; ++idir) {
         for (int coord = 0; coord < 3; ++coord) {
@@ -63,15 +74,9 @@ MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient1
                        g_convect[0][2] * g_convect[1][2];
     const Voigt3 g_elem{g11, g22, g12};
 
-    out.C_elem[0] = g_elem[0] * f0[0][0] * f0[0][0] +
-                    2.0 * g_elem[2] * f0[0][0] * f0[1][0] +
-                    g_elem[1] * f0[1][0] * f0[1][0];
-    out.C_elem[2] = g_elem[0] * f0[0][0] * f0[0][1] +
-                    g_elem[2] * (f0[0][0] * f0[1][1] + f0[0][1] * f0[1][0]) +
-                    g_elem[1] * f0[1][0] * f0[1][1];
-    out.C_elem[1] = g_elem[0] * f0[0][1] * f0[0][1] +
-                    2.0 * g_elem[2] * f0[0][1] * f0[1][1] +
-                    g_elem[1] * f0[1][1] * f0[1][1];
+    out.C_elem[0] = g_elem[0] * f00_sq + g_elem[2] * f00f10_twice + g_elem[1] * f10_sq;
+    out.C_elem[2] = g_elem[0] * f00 * f01 + g_elem[2] * shear_coeff + g_elem[1] * f10 * f11;
+    out.C_elem[1] = g_elem[0] * f01_sq + g_elem[2] * f01f11_twice + g_elem[1] * f11_sq;
 
     out.xnor_elem = Vec3{
         g_convect[0][1] * g_convect[1][2] - g_convect[0][2] * g_convect[1][1],
@@ -88,37 +93,32 @@ MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient1
         for (int idof = 0; idof < 3; ++idof) {
             const double dn1 = dn[node][0];
             const double dn2 = dn[node][1];
-            const Vec3 temp{
-                dn2 * g_convect[0][0] - dn1 * g_convect[1][0],
-                dn2 * g_convect[0][1] - dn1 * g_convect[1][1],
-                dn2 * g_convect[0][2] - dn1 * g_convect[1][2],
-            };
-            const std::array<Vec3, 3> temp1{
-                Vec3{0.0, temp[2], -temp[1]},
-                Vec3{-temp[2], 0.0, temp[0]},
-                Vec3{temp[1], -temp[0], 0.0},
-            };
+            const double temp0 = dn2 * g_convect[0][0] - dn1 * g_convect[1][0];
+            const double temp1 = dn2 * g_convect[0][1] - dn1 * g_convect[1][1];
+            const double temp2 = dn2 * g_convect[0][2] - dn1 * g_convect[1][2];
 
             const Voigt3 dg{
                 2.0 * dn1 * g_convect[0][idof],
                 2.0 * dn2 * g_convect[1][idof],
                 dn1 * g_convect[1][idof] + dn2 * g_convect[0][idof],
             };
-            out.dC[node][idof][0] = dg[0] * f0[0][0] * f0[0][0] +
-                                    2.0 * dg[2] * f0[0][0] * f0[1][0] +
-                                    dg[1] * f0[1][0] * f0[1][0];
-            out.dC[node][idof][2] = dg[0] * f0[0][0] * f0[0][1] +
-                                    dg[2] * (f0[0][0] * f0[1][1] + f0[0][1] * f0[1][0]) +
-                                    dg[1] * f0[1][0] * f0[1][1];
-            out.dC[node][idof][1] = dg[0] * f0[0][1] * f0[0][1] +
-                                    2.0 * dg[2] * f0[0][1] * f0[1][1] +
-                                    dg[1] * f0[1][1] * f0[1][1];
+            out.dC[node][idof][0] = dg[0] * f00_sq + dg[2] * f00f10_twice + dg[1] * f10_sq;
+            out.dC[node][idof][2] = dg[0] * f00 * f01 + dg[2] * shear_coeff + dg[1] * f10 * f11;
+            out.dC[node][idof][1] = dg[0] * f01_sq + dg[2] * f01f11_twice + dg[1] * f11_sq;
 
             const double dJ =
                 ((dn1 * g_elem[1] - dn2 * g_elem[2]) * g_convect[0][idof] -
                  (dn1 * g_elem[2] - dn2 * g_elem[0]) * g_convect[1][idof]) /
                 xnorm;
-            out.dnorm[node][idof] = (1.0 / xnorm) * (temp1[idof] - dJ * out.xnor_elem);
+            Vec3 cross_term{};
+            if (idof == 0) {
+                cross_term = Vec3{0.0, temp2, -temp1};
+            } else if (idof == 1) {
+                cross_term = Vec3{-temp2, 0.0, temp0};
+            } else {
+                cross_term = Vec3{temp1, -temp0, 0.0};
+            }
+            out.dnorm[node][idof] = (1.0 / xnorm) * (cross_term - dJ * out.xnor_elem);
         }
     }
 
@@ -132,6 +132,17 @@ CurvatureResult compute_curvature(const NeighborCoords12& xneigh,
                                   const NodeDerivativeVec3& dnorm) {
     CurvatureResult out;
     std::array<Vec3, 3> aux{};
+    const double f00 = f0[0][0];
+    const double f01 = f0[0][1];
+    const double f10 = f0[1][0];
+    const double f11 = f0[1][1];
+    const double f00_sq = f00 * f00;
+    const double f01_sq = f01 * f01;
+    const double f10_sq = f10 * f10;
+    const double f11_sq = f11 * f11;
+    const double f00f10_twice = 2.0 * f00 * f10;
+    const double f01f11_twice = 2.0 * f01 * f11;
+    const double shear_coeff = f00 * f11 + f01 * f10;
 
     for (int idir = 0; idir < 3; ++idir) {
         for (int coord = 0; coord < 3; ++coord) {
@@ -146,15 +157,9 @@ CurvatureResult compute_curvature(const NeighborCoords12& xneigh,
         xnor_elem[0] * aux[1][0] + xnor_elem[1] * aux[1][1] + xnor_elem[2] * aux[1][2],
         xnor_elem[0] * aux[2][0] + xnor_elem[1] * aux[2][1] + xnor_elem[2] * aux[2][2],
     };
-    out.curv0_elem[0] = curv0_aux[0] * f0[0][0] * f0[0][0] +
-                        2.0 * curv0_aux[2] * f0[0][0] * f0[1][0] +
-                        curv0_aux[1] * f0[1][0] * f0[1][0];
-    out.curv0_elem[2] = curv0_aux[0] * f0[0][0] * f0[0][1] +
-                        curv0_aux[2] * (f0[0][0] * f0[1][1] + f0[0][1] * f0[1][0]) +
-                        curv0_aux[1] * f0[1][0] * f0[1][1];
-    out.curv0_elem[1] = curv0_aux[0] * f0[0][1] * f0[0][1] +
-                        2.0 * curv0_aux[2] * f0[0][1] * f0[1][1] +
-                        curv0_aux[1] * f0[1][1] * f0[1][1];
+    out.curv0_elem[0] = curv0_aux[0] * f00_sq + curv0_aux[2] * f00f10_twice + curv0_aux[1] * f10_sq;
+    out.curv0_elem[2] = curv0_aux[0] * f00 * f01 + curv0_aux[2] * shear_coeff + curv0_aux[1] * f10 * f11;
+    out.curv0_elem[1] = curv0_aux[0] * f01_sq + curv0_aux[2] * f01f11_twice + curv0_aux[1] * f11_sq;
 
     for (int node = 0; node < 12; ++node) {
         for (int idof = 0; idof < 3; ++idof) {
@@ -166,15 +171,9 @@ CurvatureResult compute_curvature(const NeighborCoords12& xneigh,
                 aux[2][0] * dnorm[node][idof][0] + aux[2][1] * dnorm[node][idof][1] +
                     aux[2][2] * dnorm[node][idof][2] + ddn[node][2] * xnor_elem[idof],
             };
-            out.dcurv[node][idof][0] = dk[0] * f0[0][0] * f0[0][0] +
-                                       2.0 * dk[2] * f0[0][0] * f0[1][0] +
-                                       dk[1] * f0[1][0] * f0[1][0];
-            out.dcurv[node][idof][2] = dk[0] * f0[0][0] * f0[0][1] +
-                                       dk[2] * (f0[0][0] * f0[1][1] + f0[0][1] * f0[1][0]) +
-                                       dk[1] * f0[1][0] * f0[1][1];
-            out.dcurv[node][idof][1] = dk[0] * f0[0][1] * f0[0][1] +
-                                       2.0 * dk[2] * f0[0][1] * f0[1][1] +
-                                       dk[1] * f0[1][1] * f0[1][1];
+            out.dcurv[node][idof][0] = dk[0] * f00_sq + dk[2] * f00f10_twice + dk[1] * f10_sq;
+            out.dcurv[node][idof][2] = dk[0] * f00 * f01 + dk[2] * shear_coeff + dk[1] * f10 * f11;
+            out.dcurv[node][idof][1] = dk[0] * f01_sq + dk[2] * f01f11_twice + dk[1] * f11_sq;
         }
     }
 
