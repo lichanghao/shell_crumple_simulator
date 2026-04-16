@@ -1474,6 +1474,40 @@ TEST_F(E2ECyclicRuntime, CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOrac
     EXPECT_LE(max_abs, 1e-6);
 }
 
+TEST_F(E2ECyclicRuntime, CrunchItRejectsCheckpointWrittenWithDifferentRankCount) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    const auto dims = fce::io::read_dims((temp_case_dir_ / "nano_dims.dat").string());
+    const auto config = fce::io::read_config((temp_case_dir_ / "nano_config.dat").string(),
+                                             dims.numnods,
+                                             dims.numele,
+                                             dims.ngauss);
+    fce::io::CheckpointData checkpoint;
+    checkpoint.iload = 1;
+    checkpoint.icycle = 1;
+    checkpoint.nprocs = 1;
+    checkpoint.config = config;
+    checkpoint.K0_ref.assign(static_cast<std::size_t>(dims.numele),
+                             std::vector<std::array<double, 3>>(
+                                 static_cast<std::size_t>(dims.ngauss),
+                                 std::array<double, 3>{0.0, 0.0, 0.0}));
+    fce::io::write_checkpoint((temp_case_dir_ / "nano_checkpoint.dat").string(),
+                              checkpoint,
+                              dims.numnods,
+                              dims.numele,
+                              dims.ngauss,
+                              /*has_crease_memory=*/true);
+
+    const fs::path stderr_path = temp_case_dir_.parent_path() / "rank_mismatch.log";
+    const std::string command =
+        "mpirun -np 2 " + shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1" +
+        " > " + shell_quote(stderr_path) + " 2>&1";
+
+    ASSERT_NE(std::system(command.c_str()), 0);
+    const std::string output = read_file(stderr_path);
+    EXPECT_NE(output.find("checkpoint rank count mismatch"), std::string::npos);
+}
+
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
     const auto input = fce::load_simulator_input(temp_case_dir_.string());
     const std::array<int, 3> replay_steps{1, 25, 50};

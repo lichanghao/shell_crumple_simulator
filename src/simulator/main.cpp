@@ -85,34 +85,46 @@ int main(int argc, char** argv) {
                 const std::filesystem::path checkpoint_path =
                     std::filesystem::path(case_dir) / "nano_checkpoint.dat";
                 int checkpoint_found = 0;
+                int checkpoint_status = 0;
+                int checkpoint_nprocs = 0;
                 if (mpi.is_root() && std::filesystem::exists(checkpoint_path)) {
                     const auto checkpoint = fce::io::read_checkpoint(checkpoint_path.string(),
                                                                      input.mesh.numnods,
                                                                      input.mesh.numele,
                                                                      input.dims.ngauss,
                                                                      input.crease.ncrease == 1);
+                    checkpoint_nprocs = checkpoint.nprocs;
                     if (checkpoint.nprocs > 0 && checkpoint.nprocs != mpi.size()) {
-                        throw std::runtime_error("checkpoint rank count mismatch: file was written with " +
-                                                 std::to_string(checkpoint.nprocs) +
-                                                 " ranks, current run uses " +
-                                                 std::to_string(mpi.size()));
+                        checkpoint_status = -1;
+                    } else {
+                        state.coords = checkpoint.config.coords;
+                        state.eta = checkpoint.config.eta;
+                        if (!checkpoint.K0_ref.empty()) {
+                            state.K0_ref = checkpoint.K0_ref;
+                        }
+                        iload_start = checkpoint.iload + 1;
+                        checkpoint_found = 1;
                     }
-                    state.coords = checkpoint.config.coords;
-                    state.eta = checkpoint.config.eta;
-                    if (!checkpoint.K0_ref.empty()) {
-                        state.K0_ref = checkpoint.K0_ref;
-                    }
-                    iload_start = checkpoint.iload + 1;
-                    checkpoint_found = 1;
                 }
 
                 std::vector<int> meta{
+                    checkpoint_status,
                     checkpoint_found,
                     iload_start,
+                    checkpoint_nprocs,
                 };
                 mpi.bcast_ints(meta, 0);
-                checkpoint_found = meta[0];
-                iload_start = meta[1];
+                checkpoint_status = meta[0];
+                checkpoint_found = meta[1];
+                iload_start = meta[2];
+                checkpoint_nprocs = meta[3];
+
+                if (checkpoint_status < 0) {
+                    throw std::runtime_error("checkpoint rank count mismatch: file was written with " +
+                                             std::to_string(checkpoint_nprocs) +
+                                             " ranks, current run uses " +
+                                             std::to_string(mpi.size()));
+                }
 
                 if (checkpoint_found == 1) {
                     std::vector<double> coord_flat;
