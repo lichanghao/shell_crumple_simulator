@@ -39,7 +39,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 ## MUTABLE SECTION
 <!-- Update each round with justification for changes -->
 
-### Plan Version: 1 (Updated: Round 6, 2026-04-16)
+### Plan Version: 1 (Updated: Round 8, 2026-04-16)
 
 #### Plan Evolution Log
 | Round | Change | Reason | Impact on AC |
@@ -53,6 +53,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | 3 | Committed the source-backed cyclic post-`minimize_free` oracle and turned it into an explicit integration gate | `E2ECyclicRuntime.CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOracle` now reproduces the shared pre-step-1 mismatch in-tree, so future cyclic work can stay focused on `minimize_free` / translated `lbfgs.f` instead of reopening the already-fixed controller wiring | AC-7, AC-9, AC-10, AC-13 |
 | 4 | Converted the cyclic replay lane from a determinism smoke check into an enforced numeric replay-row gate | `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` now compares the emitted step-one `energy.dat` and `force.dat` rows against committed replay fixtures, making the remaining cyclic step-one mismatch an explicit red gate instead of a format-only smoke test | AC-9, AC-10, AC-13 |
 | 6 | Matched the cyclic post-`minimize_free` handoff to the committed Fortran oracle by mirroring the free-minimize first-trial exit behavior | The shared cyclic blocker is no longer upstream of `LoadController`; the active remaining gap is now the first constrained replay row, especially `GNORM` and reaction output | AC-7, AC-9, AC-10, AC-13 |
+| 8 | Refreshed the `task8c` note after the Round 8 documentation update | `document/translation_notes.md` no longer reports the pre-Round-6 cyclic post-free mismatch, so the tracker should stop treating that stale note as the active AC-13 blocker | AC-13 |
 
 #### Active Tasks
 | Task | Target AC | Status | Tag | Owner | Notes |
@@ -72,7 +73,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | task7e: Oracle tests for cyclic case and checkpoint | AC-9, AC-10 | pending | coding | claude | The cyclic post-free gate is now green, but `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` still fails on the committed replay rows with relative errors about `0.000341`, `0.04080`, `8.2862`, and `0.1554`. Restart parity and incompatible-rank failure coverage are still missing. |
 | task8a: Multi-rank consistency tests `np=1,2,4` | AC-11 | pending | coding | claude | Assembly groundwork exists, but acceptance-level MPI parity is still open. |
 | task8b: Checkpoint compatibility across rank counts | AC-10, AC-11 | pending | coding | claude | Depends on checkpoint implementation. |
-| task8c: `AGENT.md` and `document/translation_notes.md` finalization | AC-13 | in_progress | coding | claude | `document/translation_notes.md` still records the pre-Round-6 post-free mismatch and needs to be refreshed before AC-13 can close. Final documentation still depends on closing the remaining AC-7, AC-8, AC-9, AC-10, and AC-11 runtime gaps. |
+| task8c: `AGENT.md` and `document/translation_notes.md` finalization | AC-13 | in_progress | coding | claude | `document/translation_notes.md` is refreshed for the current cyclic post-free status, but AC-13 cannot close until the remaining AC-7, AC-8, AC-9, AC-10, and AC-11 runtime gaps are resolved and the final verification evidence is recorded. |
 | task8d: Full integration test suite | AC-1 through AC-13 | pending | analyze | codex | The full integration surface still contains red archived-runtime gates and timing issues; rerun only after the current AC-7 executable-path blocker materially changes. |
 
 ### Completed and Verified
