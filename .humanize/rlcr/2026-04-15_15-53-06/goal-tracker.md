@@ -39,7 +39,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 ## MUTABLE SECTION
 <!-- Update each round with justification for changes -->
 
-### Plan Version: 1 (Updated: Round 10, 2026-04-16)
+### Plan Version: 1 (Updated: Round 12, 2026-04-16)
 
 #### Plan Evolution Log
 | Round | Change | Reason | Impact on AC |
@@ -57,10 +57,12 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | 9 | Extended checkpoint semantics with writing-rank metadata and moved cyclic restart restore to rank-0 read plus MPI broadcast | The executable path now distinguishes legacy checkpoints from new rank-aware files, restores `coords` / `eta` / `K0_ref` consistently across ranks, and records the writing MPI size for future compatibility checks | AC-10, AC-11, AC-13 |
 | 10 | Made incompatible-rank checkpoint rejection collective-safe and added an executable-path multi-rank regression | The rank-count mismatch path now broadcasts restore status before any rank throws, so incompatible checkpoints fail consistently under `mpirun`, but restart parity and generic restore-error coordination are still open | AC-10, AC-11, AC-13 |
 | 11 | Generalized checkpoint restore failure handling so malformed checkpoint reads are coordinated across ranks too | Rank 0 now catches generic `read_checkpoint()` failures, broadcasts the restore status before any rank throws, and the executable path now has multi-rank regressions for both incompatible-rank and malformed-checkpoint rejection; uninterrupted-vs-restarted parity is still open | AC-10, AC-11, AC-13 |
+| 12 | Reopened `task3e` and aligned the tracker with the current element-energy verification state | `document/translation_notes.md` now correctly says the constitutive / element-energy surface is only partially verified while two oracle-backed unit tests remain red, so the tracker cannot keep listing `task3e` as completed and verified | AC-7, AC-13 |
 
 #### Active Tasks
 | Task | Target AC | Status | Tag | Owner | Notes |
 |------|-----------|--------|-----|-------|-------|
+| task3e: Element-level energy/force kernel | AC-7 | in_progress | coding | claude | Reopened for honesty and closure: archived fixture subsets and replay-only exact-state gates are green, but `ElementEnergy.FlagNumDiffStressesMatchFortranOracle` and `ElementEnergy.BrennerMaterialMatchesFortranOracle` still fail, so this kernel surface is not yet fully verified. |
 | task4d: `pasapas` load-stepping loop | AC-7 | in_progress | coding | claude | The deterministic replay lane is now green against committed replay-specific step-one fixtures, but archived step-one parity is still unresolved on the executable path. The remaining blocker is to explain and close the archive-contract mismatch in constrained minimization / emitted step-one runtime state. |
 | task4e: Reaction-force computation for `nCodeLoad=3` | AC-7 | pending | coding | claude | Replay-lane rows are now stable, but archive-backed executable-path parity for reaction outputs is still not closed. |
 | task4f: End-to-end serial run vs oracle | AC-7 | pending | coding | claude | The 50-step archived-oracle executable-path test still does not complete within the current budget. |
@@ -100,7 +102,6 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | AC-5, AC-6 | task3b: Deformation gradient decomposition and bond vectors | 23 | 23 | `Exponential.MatchesArchivedCompressionFortranOracle` plus manual `ElementState` composition coverage are green. |
 | AC-5 | task3c: Brenner REBO potential | prior | prior | Dedicated Brenner oracle coverage exists in the unit suite. |
 | AC-6 | task3d: Inner Newton solver for `eta` | 8 | 8 | `NewtonInner.MatchesCommittedFortranOracleFixtures`, archived `ElementState` parity, and the first constrained-step exact-state gate are green. |
-| AC-7 | task3e: Element-level energy/force kernel | 8 | 8 | `ElementEnergy.MatchesArchivedCompressionSimulatorOracleFixtures`, `ElementEnergy.FElemMatchesFortranOracle`, and the first constrained-step exact-state gate are green. |
 | AC-7, AC-9 | task3f: Principal curvature extraction | prior | prior | Direct Fortran-derived fallback coverage exists. |
 | AC-7, AC-11 | task4a: Global energy/force assembly with MPI partitioning | 28 | 29 | `SimulatorAssembly.ArchivedEnergyTrajectoryMatchesOracleFile` and related coverage are committed and passing. |
 | AC-7 | task4b: L-BFGS minimizer from `lbfgs.f` | prior | prior | The translated Nocedal/MCSRCH path is implemented and unit-tested. |
