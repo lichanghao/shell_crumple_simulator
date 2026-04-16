@@ -75,6 +75,7 @@ void       write_config(const std::string& path, const ConfigData& c,
 struct CheckpointData {
     int iload{0};
     int icycle{0};
+    int nprocs{0};
     ConfigData config{};
     std::vector<std::vector<std::array<double, 3>>> K0_ref{};
 };

@@ -84,18 +84,113 @@ int main(int argc, char** argv) {
             if (input.bcs.nCodeLoad == 30 || input.bcs.nCodeLoad == 31) {
                 const std::filesystem::path checkpoint_path =
                     std::filesystem::path(case_dir) / "nano_checkpoint.dat";
-                if (std::filesystem::exists(checkpoint_path)) {
+                int checkpoint_found = 0;
+                if (mpi.is_root() && std::filesystem::exists(checkpoint_path)) {
                     const auto checkpoint = fce::io::read_checkpoint(checkpoint_path.string(),
                                                                      input.mesh.numnods,
                                                                      input.mesh.numele,
                                                                      input.dims.ngauss,
                                                                      input.crease.ncrease == 1);
+                    if (checkpoint.nprocs > 0 && checkpoint.nprocs != mpi.size()) {
+                        throw std::runtime_error("checkpoint rank count mismatch: file was written with " +
+                                                 std::to_string(checkpoint.nprocs) +
+                                                 " ranks, current run uses " +
+                                                 std::to_string(mpi.size()));
+                    }
                     state.coords = checkpoint.config.coords;
                     state.eta = checkpoint.config.eta;
                     if (!checkpoint.K0_ref.empty()) {
                         state.K0_ref = checkpoint.K0_ref;
                     }
                     iload_start = checkpoint.iload + 1;
+                    checkpoint_found = 1;
+                }
+
+                std::vector<int> meta{
+                    checkpoint_found,
+                    iload_start,
+                };
+                mpi.bcast_ints(meta, 0);
+                checkpoint_found = meta[0];
+                iload_start = meta[1];
+
+                if (checkpoint_found == 1) {
+                    std::vector<double> coord_flat;
+                    if (mpi.is_root()) {
+                        coord_flat.reserve(state.coords.size() * 3);
+                        for (const auto& p : state.coords) {
+                            coord_flat.push_back(p[0]);
+                            coord_flat.push_back(p[1]);
+                            coord_flat.push_back(p[2]);
+                        }
+                    }
+                    mpi.bcast_doubles(coord_flat, 0);
+                    if (!mpi.is_root()) {
+                        state.coords.resize(static_cast<std::size_t>(input.mesh.numnods));
+                        for (int inode = 0; inode < input.mesh.numnods; ++inode) {
+                            const std::size_t base = static_cast<std::size_t>(3 * inode);
+                            state.coords[static_cast<std::size_t>(inode)] = {
+                                coord_flat[base],
+                                coord_flat[base + 1],
+                                coord_flat[base + 2],
+                            };
+                        }
+                    }
+
+                    std::vector<double> eta_flat;
+                    if (mpi.is_root()) {
+                        eta_flat.reserve(static_cast<std::size_t>(input.mesh.numele * input.dims.ngauss * 2));
+                        for (const auto& elem_eta : state.eta) {
+                            for (const auto& eta : elem_eta) {
+                                eta_flat.push_back(eta[0]);
+                                eta_flat.push_back(eta[1]);
+                            }
+                        }
+                    }
+                    mpi.bcast_doubles(eta_flat, 0);
+                    if (!mpi.is_root()) {
+                        state.eta.assign(static_cast<std::size_t>(input.mesh.numele),
+                                         std::vector<fce::Vec2>(static_cast<std::size_t>(input.dims.ngauss)));
+                        std::size_t cursor = 0;
+                        for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+                            for (int igauss = 0; igauss < input.dims.ngauss; ++igauss) {
+                                state.eta[static_cast<std::size_t>(ielem)][static_cast<std::size_t>(igauss)] = {
+                                    eta_flat[cursor],
+                                    eta_flat[cursor + 1],
+                                };
+                                cursor += 2;
+                            }
+                        }
+                    }
+
+                    std::vector<double> k0_flat;
+                    if (mpi.is_root() && !state.K0_ref.empty()) {
+                        k0_flat.reserve(static_cast<std::size_t>(input.mesh.numele * input.dims.ngauss * 3));
+                        for (const auto& elem_k0 : state.K0_ref) {
+                            for (const auto& kappa : elem_k0) {
+                                k0_flat.push_back(kappa[0]);
+                                k0_flat.push_back(kappa[1]);
+                                k0_flat.push_back(kappa[2]);
+                            }
+                        }
+                    }
+                    mpi.bcast_doubles(k0_flat, 0);
+                    if (!mpi.is_root() && !k0_flat.empty()) {
+                        state.K0_ref.assign(static_cast<std::size_t>(input.mesh.numele),
+                                            std::vector<std::array<double, 3>>(
+                                                static_cast<std::size_t>(input.dims.ngauss)));
+                        std::size_t cursor = 0;
+                        for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+                            for (int igauss = 0; igauss < input.dims.ngauss; ++igauss) {
+                                state.K0_ref[static_cast<std::size_t>(ielem)][static_cast<std::size_t>(igauss)] = {
+                                    k0_flat[cursor],
+                                    k0_flat[cursor + 1],
+                                    k0_flat[cursor + 2],
+                                };
+                                cursor += 3;
+                            }
+                        }
+                    }
                 }
             }
 

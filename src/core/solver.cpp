@@ -310,10 +310,12 @@ void write_runtime_checkpoint(const SimulatorInput& input,
                               const RuntimeState& state,
                               const std::string& output_dir,
                               const int iload,
-                              const int icycle) {
+                              const int icycle,
+                              const int nprocs) {
     io::CheckpointData checkpoint;
     checkpoint.iload = iload;
     checkpoint.icycle = icycle;
+    checkpoint.nprocs = nprocs;
     checkpoint.config.coords = state.coords;
     checkpoint.config.eta = state.eta;
     checkpoint.K0_ref = state.K0_ref;
@@ -621,7 +623,7 @@ void pasapas(const SimulatorInput& input,
             write_mesh_snapshot(input, state, output_dir, iload);
             if ((bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31) &&
                 iload_in_cycle == bcs.nloadstep_comp + bcs.nloadstep_rel) {
-                write_runtime_checkpoint(input, state, output_dir, iload, icycle);
+                write_runtime_checkpoint(input, state, output_dir, iload, icycle, mpi.size());
             }
         }
     }

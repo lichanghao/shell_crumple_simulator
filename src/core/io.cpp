@@ -372,7 +372,16 @@ CheckpointData read_checkpoint(const std::string& path,
     checkpoint.iload = std::stoi(read_data_tokens(1, "checkpoint_step value").front());
     expect_label("checkpoint_cycle");
     checkpoint.icycle = std::stoi(read_data_tokens(1, "checkpoint_cycle value").front());
-    expect_label("Nodal positions");
+    std::string line;
+    if (!next_nonempty_line(line)) {
+        throw std::runtime_error("checkpoint is missing nodal positions header");
+    }
+    if (trim_line(line) == "checkpoint_nprocs") {
+        checkpoint.nprocs = std::stoi(read_data_tokens(1, "checkpoint_nprocs value").front());
+        expect_label("Nodal positions");
+    } else if (trim_line(line) != "Nodal positions") {
+        throw std::runtime_error("checkpoint label mismatch, expected: Nodal positions");
+    }
     for (int inode = 0; inode < numnods; ++inode) {
         const auto toks = read_data_tokens(3, "nodal positions");
         checkpoint.config.coords[static_cast<std::size_t>(inode)] = Vec3{
@@ -402,7 +411,6 @@ CheckpointData read_checkpoint(const std::string& path,
                                  static_cast<std::size_t>(ngauss),
                                  std::array<double, 3>{0.0, 0.0, 0.0}));
 
-    std::string line;
     if (!next_nonempty_line(line)) {
         return checkpoint;
     }
@@ -439,6 +447,8 @@ void write_checkpoint(const std::string& path,
     out << std::setw(12) << checkpoint.iload << "\n";
     out << " checkpoint_cycle\n";
     out << std::setw(12) << checkpoint.icycle << "\n";
+    out << " checkpoint_nprocs\n";
+    out << std::setw(12) << checkpoint.nprocs << "\n";
     out << " Nodal positions\n";
     for (int inode = 0; inode < numnods; ++inode) {
         const auto& p = checkpoint.config.coords.at(static_cast<std::size_t>(inode));

@@ -145,11 +145,39 @@ TEST(ReadCheckpoint, GrapheneCyclicCrumple) {
     EXPECT_NEAR(checkpoint.config.coords[1][0], 5.0014290770334624e-1, 1e-15);
     EXPECT_NEAR(checkpoint.config.coords[1][1], 5.7573756533081263e-5, 1e-18);
     EXPECT_NEAR(checkpoint.config.coords[1][2], -5.2338478808536719e-3, 1e-18);
+    EXPECT_EQ(checkpoint.nprocs, 0);
     ASSERT_EQ(checkpoint.K0_ref.size(), 3200U);
     ASSERT_EQ(checkpoint.K0_ref.front().size(), 2U);
     EXPECT_DOUBLE_EQ(checkpoint.K0_ref.front().front()[0], 0.0);
     EXPECT_DOUBLE_EQ(checkpoint.K0_ref.front().front()[1], 0.0);
     EXPECT_DOUBLE_EQ(checkpoint.K0_ref.front().front()[2], 0.0);
+}
+
+TEST(ReadWriteCheckpoint, PreservesRankMetadata) {
+    fce::io::CheckpointData checkpoint;
+    checkpoint.iload = 7;
+    checkpoint.icycle = 2;
+    checkpoint.nprocs = 4;
+    checkpoint.config.coords = {
+        fce::Vec3{1.0, 2.0, 3.0},
+        fce::Vec3{4.0, 5.0, 6.0},
+    };
+    checkpoint.config.eta = {
+        std::vector<fce::Vec2>{fce::Vec2{0.1, 0.2}},
+    };
+
+    const std::string tmp = "/tmp/fce_test_checkpoint_rank.dat";
+    fce::io::write_checkpoint(tmp, checkpoint, 2, 1, 1, /*has_crease_memory=*/false);
+    const auto reread = fce::io::read_checkpoint(tmp, 2, 1, 1, /*has_crease_memory=*/false);
+
+    EXPECT_EQ(reread.iload, 7);
+    EXPECT_EQ(reread.icycle, 2);
+    EXPECT_EQ(reread.nprocs, 4);
+    ASSERT_EQ(reread.config.coords.size(), 2U);
+    EXPECT_DOUBLE_EQ(reread.config.coords[1][2], 6.0);
+    ASSERT_EQ(reread.config.eta.size(), 1U);
+    EXPECT_DOUBLE_EQ(reread.config.eta[0][0][0], 0.1);
+    EXPECT_DOUBLE_EQ(reread.config.eta[0][0][1], 0.2);
 }
 
 // ─── nano_BCs.dat ─────────────────────────────────────────────────────────────
