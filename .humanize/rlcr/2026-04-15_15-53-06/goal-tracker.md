@@ -39,7 +39,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 ## MUTABLE SECTION
 <!-- Update each round with justification for changes -->
 
-### Plan Version: 1 (Updated: Round 12, 2026-04-16)
+### Plan Version: 1 (Updated: Round 14, 2026-04-16)
 
 #### Plan Evolution Log
 | Round | Change | Reason | Impact on AC |
@@ -58,11 +58,11 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | 10 | Made incompatible-rank checkpoint rejection collective-safe and added an executable-path multi-rank regression | The rank-count mismatch path now broadcasts restore status before any rank throws, so incompatible checkpoints fail consistently under `mpirun`, but restart parity and generic restore-error coordination are still open | AC-10, AC-11, AC-13 |
 | 11 | Generalized checkpoint restore failure handling so malformed checkpoint reads are coordinated across ranks too | Rank 0 now catches generic `read_checkpoint()` failures, broadcasts the restore status before any rank throws, and the executable path now has multi-rank regressions for both incompatible-rank and malformed-checkpoint rejection; uninterrupted-vs-restarted parity is still open | AC-10, AC-11, AC-13 |
 | 12 | Reopened `task3e` and aligned the tracker with the current element-energy verification state | `document/translation_notes.md` now correctly says the constitutive / element-energy surface is only partially verified while two oracle-backed unit tests remain red, so the tracker cannot keep listing `task3e` as completed and verified | AC-7, AC-13 |
+| 14 | Refreshed the source-backed flat/Brenner element-energy oracle fixtures and reclosed `task3e` | The committed `flat_geom_np1` and `brenner_geom_np1` fixtures were stale relative to the canonical Fortran dump tools; after regenerating them, both previously red oracle-backed `ElementEnergy` tests and the full `unit_tests` binary are green again | AC-7, AC-13 |
 
 #### Active Tasks
 | Task | Target AC | Status | Tag | Owner | Notes |
 |------|-----------|--------|-----|-------|-------|
-| task3e: Element-level energy/force kernel | AC-7 | in_progress | coding | claude | Reopened for honesty and closure: archived fixture subsets and replay-only exact-state gates are green, but `ElementEnergy.FlagNumDiffStressesMatchFortranOracle` and `ElementEnergy.BrennerMaterialMatchesFortranOracle` still fail, so this kernel surface is not yet fully verified. |
 | task4d: `pasapas` load-stepping loop | AC-7 | in_progress | coding | claude | The deterministic replay lane is now green against committed replay-specific step-one fixtures, but archived step-one parity is still unresolved on the executable path. The remaining blocker is to explain and close the archive-contract mismatch in constrained minimization / emitted step-one runtime state. |
 | task4e: Reaction-force computation for `nCodeLoad=3` | AC-7 | pending | coding | claude | Replay-lane rows are now stable, but archive-backed executable-path parity for reaction outputs is still not closed. |
 | task4f: End-to-end serial run vs oracle | AC-7 | pending | coding | claude | The 50-step archived-oracle executable-path test still does not complete within the current budget. |
@@ -102,6 +102,7 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | AC-5, AC-6 | task3b: Deformation gradient decomposition and bond vectors | 23 | 23 | `Exponential.MatchesArchivedCompressionFortranOracle` plus manual `ElementState` composition coverage are green. |
 | AC-5 | task3c: Brenner REBO potential | prior | prior | Dedicated Brenner oracle coverage exists in the unit suite. |
 | AC-6 | task3d: Inner Newton solver for `eta` | 8 | 8 | `NewtonInner.MatchesCommittedFortranOracleFixtures`, archived `ElementState` parity, and the first constrained-step exact-state gate are green. |
+| AC-7 | task3e: Element-level energy/force kernel | 14 | 14 | `ElementEnergy.FlagNumDiffStressesMatchFortranOracle`, `ElementEnergy.BrennerMaterialMatchesFortranOracle`, and the full `./build/unit_tests` binary are green after refreshing the source-backed `flat_geom_np1` and `brenner_geom_np1` oracle fixtures. |
 | AC-7, AC-9 | task3f: Principal curvature extraction | prior | prior | Direct Fortran-derived fallback coverage exists. |
 | AC-7, AC-11 | task4a: Global energy/force assembly with MPI partitioning | 28 | 29 | `SimulatorAssembly.ArchivedEnergyTrajectoryMatchesOracleFile` and related coverage are committed and passing. |
 | AC-7 | task4b: L-BFGS minimizer from `lbfgs.f` | prior | prior | The translated Nocedal/MCSRCH path is implemented and unit-tested. |
@@ -122,6 +123,6 @@ Translate the Fortran 90 graphene simulation codebase — comprising `grapheneCo
 | The committed cyclic replay-row gate is now numerically enforced and still fails on the first positive-load rows: `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` reports relative errors about `0.000341` and `0.04080` in `energy.dat`/`GNORM`, and about `8.2862` / `0.1554` in `force.dat`. | 4 | AC-9, AC-10 | Keep the replay-row gate red until the downstream constrained-step and reaction output match the committed replay fixtures, then add restart parity and incompatible-rank coverage. |
 | Archived `mesh_config_0000.vtu` is a pre-`pasapas()` artifact, so step-0 VTU parity cannot prove the hidden post-free state matches Fortran. | 1 | AC-7 | Continue using direct hidden-state comparisons or pre-step-1 dumps rather than archived step-0 geometry parity as a physical oracle. |
 | Runtime vdW/self-contact remains unimplemented even though preprocessor-side `nvdw=1` parity is complete. | 3 | AC-8 | Translate the simulator-side `vdw_modules.f90` path and add runtime oracle coverage. |
-| The full `unit_tests` binary still fails `ElementEnergy.FlagNumDiffStressesMatchFortranOracle` and `ElementEnergy.BrennerMaterialMatchesFortranOracle`, so the tracker is overstating how clean the constitutive / element-energy surface currently is. | 9 | AC-7, AC-13 | Either fix the failing oracle-backed element-energy paths or reopen the affected verification claims so the tracker and docs stop implying the kernel surface is fully green. |
+| `document/translation_notes.md` is still internally inconsistent after the Round 14 fixture refresh: the status table now says constitutive / archived element-energy coverage is verified, but the AC-7 open-gap narrative still says the full unit suite reports red `ElementEnergy` failures. | 14 | AC-13 | Remove the stale red-test claim from the AC-7 narrative and keep the remaining blocker focused on executable-path runtime parity. |
 | The repository still lacks an executable-path real-`nvdw=1` VTU/PVD oracle series. | 40 | AC-12, AC-8 | Add a real runtime `nvdw=1` executable-path case and compare VTU/PVD payloads end to end. |
 | The archived-oracle executable-path compression test still does not complete within the current `ctest` budget. | 42 | AC-7, AC-13 | First close the archived step-one runtime mismatch so the runtime follows the archived trajectory, then finish the 50-step run within the existing budget. |
