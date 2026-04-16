@@ -45,6 +45,7 @@ public:
     //   1  = max_eval reached without convergence
     int minimize(std::vector<double>& x,
                  double xnorm0,
+                 bool stop_on_first_trial,
                  std::function<std::pair<double, std::vector<double>>(
                      const std::vector<double>&)> callback);
 

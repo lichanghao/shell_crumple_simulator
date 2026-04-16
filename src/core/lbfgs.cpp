@@ -169,6 +169,7 @@ void LbfgsSolver::print_monitor_iteration(const int iter,
 
 int LbfgsSolver::minimize(std::vector<double>& x,
                            double xnorm0,
+                           bool stop_on_first_trial,
                            std::function<std::pair<double, std::vector<double>>(
                                const std::vector<double>&)> callback) {
     const int n = static_cast<int>(x.size());
@@ -222,6 +223,10 @@ int LbfgsSolver::minimize(std::vector<double>& x,
         // The caller-side reverse-communication gate in minimize.f90 and
         // minimize_free.f90 compares the stale GNORM argument returned by
         // LBFGS, which is actually CRIT_CONV, not the raw ||g||.
+        if (stop_on_first_trial) {
+            stopped_on_trial_gnorm_gate_ = true;
+            return 0;
+        }
         icall++;
         if (crit_conv_ < eps_) {
             stopped_on_trial_gnorm_gate_ = true;

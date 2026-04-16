@@ -372,7 +372,7 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
         return {res.total_energy, extract_free_gradient(res, bcs)};
     };
 
-    int flag = solver.minimize(x_free, xnorm0, callback);
+    int flag = solver.minimize(x_free, xnorm0, /*stop_on_first_trial=*/true, callback);
 
     // Broadcast and scatter final state.
     double gnorm = solver.gnorm();
@@ -441,7 +441,7 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
         return {res.total_energy, extract_free_gradient(res, bcs)};
     };
 
-    int flag = solver.minimize(x_free, xnorm0, callback);
+    int flag = solver.minimize(x_free, xnorm0, /*stop_on_first_trial=*/false, callback);
 
     // MPI broadcast (mirrors Fortran MPI_BCAST of IFLAG, GNORM, X).
     double gnorm = solver.gnorm();

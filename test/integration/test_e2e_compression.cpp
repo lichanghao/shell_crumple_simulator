@@ -1155,6 +1155,7 @@ TEST(ReplayOracle, StepOneEvalSequenceMatchesCommittedFortranReplayTrace) {
         solver.minimize(
             x_free,
             xnorm0,
+            /*stop_on_first_trial=*/false,
             [&](const std::vector<double>& xv) -> std::pair<double, std::vector<double>> {
                 load_ctrl.scatter_all(xv, state.coords);
                 auto assembly = fce::assemble_energy_forces(input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
