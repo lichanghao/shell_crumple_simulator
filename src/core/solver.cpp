@@ -223,11 +223,8 @@ void bcast_solver_state(const MpiEnv& mpi,
 }
 
 // ─── real-node forces (trim ghost contributions) ──────────────────────────────
-// After assemble_energy_forces, result.force has size 3*(numnods+nedge).
-// We only pass the first 3*numnods to reaction computation.
 std::vector<double> real_node_forces(const AssemblyResult& res, int numnods) {
-    return std::vector<double>(res.force.begin(),
-                                res.force.begin() + 3 * numnods);
+    return std::vector<double>(res.force.begin(), res.force.begin() + 3 * numnods);
 }
 
 void apply_imperfections(const SimulatorInput& input,
@@ -387,14 +384,9 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
             x_free.at(static_cast<std::size_t>(i));
     }
 
-    // Canonical Fortran exits minimize_free on the first IFLAG=1 return when
-    // GNORM < EPS. In that path x_short already holds the trial coordinates,
-    // but E_out / eta still correspond to the previous assembly because the
-    // trial point is never re-evaluated. Preserve that behavior for AC-7.
-    if (!solver.stopped_on_trial_gnorm_gate()) {
-        final_asm = assemble_energy_forces(input, state, mpi);
-        final_E = to_energy_components(final_asm);
-    }
+    // Canonical Fortran minimize_free never performs a post-LBFGS reassembly.
+    // It preserves the last in-loop energy/force/eta state, then scatters the
+    // final x_short back into x0. Keep that behavior for executable-path parity.
 
     MinimizeFreeResult result;
     result.E     = final_E;
@@ -452,13 +444,9 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     // Final scatter mirrors Fortran long(...).
     load_ctrl.scatter_all(x_free, state.coords);
 
-    // Mirror the free minimizer for the rare GNORM<EPS-on-IFLAG=1 exit:
-    // preserve the last evaluated assembly instead of forcing a trial-point
-    // reassembly the canonical Fortran path never performs.
-    if (!solver.stopped_on_trial_gnorm_gate()) {
-        final_asm = assemble_energy_forces(input, state, mpi);
-        final_E = to_energy_components(final_asm);
-    }
+    // Canonical Fortran minimize likewise keeps the last in-loop assembly and
+    // only scatters the final x vector back into x0 at exit. Do not force a
+    // post-LBFGS reassembly here.
 
     MinimizeResult result;
     result.E     = final_E;
