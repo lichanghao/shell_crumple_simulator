@@ -102,3 +102,39 @@ TEST(LbfgsConvergesOnRosenbrock, TwoDimensional) {
     EXPECT_NEAR(x[0], 1.0, 1.0e-4) << "x[0] not near 1";
     EXPECT_NEAR(x[1], 1.0, 1.0e-4) << "x[1] not near 1";
 }
+
+TEST(LbfgsStopOnFirstTrial, OnlyTerminatesWhenEnabled) {
+    std::vector<double> x_enabled = {1.0, -1.0, 0.5};
+    std::vector<double> x_disabled = x_enabled;
+    const double xnorm0 = 1.0;
+
+    int enabled_calls = 0;
+    int disabled_calls = 0;
+
+    auto callback_enabled =
+        [&](const std::vector<double>& x) -> std::pair<double, std::vector<double>> {
+            ++enabled_calls;
+            return quadratic_callback(x);
+        };
+    auto callback_disabled =
+        [&](const std::vector<double>& x) -> std::pair<double, std::vector<double>> {
+            ++disabled_calls;
+            return quadratic_callback(x);
+        };
+
+    fce::LbfgsSolver enabled_solver(10, 1.0e-8, 1.0e-12, 20000);
+    fce::LbfgsSolver disabled_solver(10, 1.0e-8, 1.0e-12, 20000);
+
+    const int enabled_flag =
+        enabled_solver.minimize(x_enabled, xnorm0, /*stop_on_first_trial=*/true, callback_enabled);
+    const int disabled_flag =
+        disabled_solver.minimize(x_disabled, xnorm0, /*stop_on_first_trial=*/false, callback_disabled);
+
+    EXPECT_EQ(enabled_flag, 0);
+    EXPECT_EQ(enabled_calls, 1);
+    EXPECT_TRUE(enabled_solver.stopped_on_trial_gnorm_gate());
+
+    EXPECT_LE(disabled_flag, 0);
+    EXPECT_GT(disabled_calls, 1);
+    EXPECT_FALSE(disabled_solver.stopped_on_trial_gnorm_gate());
+}
