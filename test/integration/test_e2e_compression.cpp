@@ -1447,6 +1447,54 @@ TEST_F(E2ECyclicRuntime, CrunchItReplaysCommittedCyclicStepOneTraceDeterministic
     EXPECT_EQ(read_file(temp_case_dir_ / "force.dat"), force_first);
 }
 
+TEST_F(E2ECyclicRuntime, GeneratedStepOneVtuMatchesGeneratedEnergyAndReactionRows) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    auto state = replay_state_from_oracle_vtu(temp_case_dir_ / "mesh_config_0001.vtu", input);
+    const auto assembly = fce::assemble_energy_forces(
+        input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
+
+    const auto energy_tokens = last_data_tokens(temp_case_dir_ / "energy.dat");
+    const auto force_tokens = last_data_tokens(temp_case_dir_ / "force.dat");
+
+    ASSERT_GE(energy_tokens.size(), 8U);
+    ASSERT_GE(force_tokens.size(), 5U);
+
+    EXPECT_LE(relative_error(assembly.total_energy,
+                             fce::io::parse_fortran_double(energy_tokens[3]),
+                             1e-12),
+              1e-4)
+        << "generated cyclic step-one VTU vs generated energy.dat total energy";
+
+    std::vector<double> forces_real(
+        assembly.force.begin(),
+        assembly.force.begin() + 3 * input.mesh.numnods);
+    fce::LoadController load_ctrl(input.bcs);
+    load_ctrl.init(state.coords);
+
+    double reaction1 = 0.0;
+    double reaction2 = 0.0;
+    load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+
+    EXPECT_LE(relative_error(reaction1,
+                             fce::io::parse_fortran_double(force_tokens[3]),
+                             1e-12),
+              1e-3)
+        << "generated cyclic step-one VTU vs generated force.dat reaction1";
+    EXPECT_LE(relative_error(reaction2,
+                             fce::io::parse_fortran_double(force_tokens[4]),
+                             1e-12),
+              1e-3)
+        << "generated cyclic step-one VTU vs generated force.dat reaction2";
+}
+
 TEST(CompressionCaseFiles, ArchivedAndReplayCyclicStepOneRowsAreDistinctContracts) {
     const auto archived_energy_tokens =
         last_data_tokens(fs::path(kOracleDir) / "graphene_cyclic_crumple" / "simulator_run" / "energy.dat");
