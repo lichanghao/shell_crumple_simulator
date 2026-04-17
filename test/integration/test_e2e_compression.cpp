@@ -272,6 +272,30 @@ std::vector<fce::Vec2> read_fortran_eta_dump_flat(const fs::path& path) {
     return out;
 }
 
+std::vector<std::vector<double>> read_numeric_table(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open numeric table: " + path.string());
+    }
+    std::vector<std::vector<double>> rows;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        std::istringstream row(line);
+        std::vector<double> parsed;
+        std::string token;
+        while (row >> token) {
+            parsed.push_back(fce::io::parse_fortran_double(token));
+        }
+        if (!parsed.empty()) {
+            rows.push_back(std::move(parsed));
+        }
+    }
+    return rows;
+}
+
 StepMonitorFixture read_replay_step_one_monitor_fixture(const fs::path& path) {
     std::ifstream in(path);
     if (!in) {
@@ -1587,6 +1611,8 @@ TEST_F(E2ECyclicRuntime, TraceDumpsCaptureCyclicReplayCheckpoints) {
     const fs::path before_output_eta = dump_dir / "step1_before_output_eta.dat";
     const fs::path before_output_summary = dump_dir / "step1_before_output_summary.dat";
     const fs::path before_output_reaction = dump_dir / "step1_before_output_reaction.dat";
+    const fs::path eval_trace = dump_dir / "step1_eval_trace.dat";
+    const fs::path accepted_lbfgs = dump_dir / "step1_accepted_lbfgs.dat";
     const fs::path legacy_reaction = dump_dir / "step1_reaction.dat";
 
     for (const auto& path : {after_increment,
@@ -1599,6 +1625,8 @@ TEST_F(E2ECyclicRuntime, TraceDumpsCaptureCyclicReplayCheckpoints) {
                              before_output_eta,
                              before_output_summary,
                              before_output_reaction,
+                             eval_trace,
+                             accepted_lbfgs,
                              legacy_reaction}) {
         EXPECT_TRUE(fs::exists(path)) << "missing trace artifact " << path;
     }
@@ -1645,6 +1673,16 @@ TEST_F(E2ECyclicRuntime, TraceDumpsCaptureCyclicReplayCheckpoints) {
                              fce::io::parse_fortran_double(energy_tokens[7]),
                              1e-12),
               1e-6);
+
+    const auto eval_rows = read_numeric_table(eval_trace);
+    ASSERT_FALSE(eval_rows.empty());
+    EXPECT_NEAR(eval_rows.front().at(1), first_eval_summary_values.at("E_total"), 1e-12);
+    EXPECT_NEAR(eval_rows.back().at(1), output_summary.at("assembly_total_energy"), 1e-12);
+
+    const auto accepted_rows = read_numeric_table(accepted_lbfgs);
+    ASSERT_FALSE(accepted_rows.empty());
+    EXPECT_NEAR(accepted_rows.back().at(2), output_summary.at("assembly_total_energy"), 1e-6);
+    EXPECT_NEAR(accepted_rows.back().at(3), output_summary.at("GNORM"), 1e-6);
 
     const auto reaction_lines = read_file(before_output_reaction);
     EXPECT_NE(reaction_lines.find("# reaction1"), std::string::npos);

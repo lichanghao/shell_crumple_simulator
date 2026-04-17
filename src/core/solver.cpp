@@ -203,6 +203,113 @@ void write_summary_dump_if_enabled(const std::string& stage,
     out << "inner_fail " << inner_fail << "\n";
 }
 
+void write_lbfgs_step_trace_header_if_enabled(const int iload,
+                                              const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+    const std::string path =
+        trace_dump_dir() + "/step" + std::to_string(iload) + "_accepted_lbfgs.dat";
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+    out << "# iter nfun f critc stp"
+        << " node1_z node5_z node45_z node85_z node125_z node165_z node205_z"
+        << " node41_x node1641_y node1681_x node1681_y\n";
+}
+
+void append_lbfgs_step_trace_if_enabled(const int iload,
+                                        const Coords& coords,
+                                        const int iter,
+                                        const int nfun,
+                                        const double f,
+                                        const double critc,
+                                        const double stp,
+                                        const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+    const std::string path =
+        trace_dump_dir() + "/step" + std::to_string(iload) + "_accepted_lbfgs.dat";
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+
+    auto coord = [&](int one_based, int axis) -> double {
+        return coords.at(static_cast<std::size_t>(one_based - 1))[axis];
+    };
+
+    out << std::uppercase << std::scientific << std::setprecision(16)
+        << std::setw(6) << iter
+        << std::setw(6) << nfun
+        << std::setw(24) << f
+        << std::setw(24) << critc
+        << std::setw(24) << stp
+        << std::setw(24) << coord(1, 2)
+        << std::setw(24) << coord(5, 2)
+        << std::setw(24) << coord(45, 2)
+        << std::setw(24) << coord(85, 2)
+        << std::setw(24) << coord(125, 2)
+        << std::setw(24) << coord(165, 2)
+        << std::setw(24) << coord(205, 2)
+        << std::setw(24) << coord(41, 0)
+        << std::setw(24) << coord(1641, 1)
+        << std::setw(24) << coord(1681, 0)
+        << std::setw(24) << coord(1681, 1)
+        << "\n";
+}
+
+void write_eval_trace_header_if_enabled(const int iload,
+                                        const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+    const std::string path =
+        trace_dump_dir() + "/step" + std::to_string(iload) + "_eval_trace.dat";
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+    out << "# eval f node1_z node5_z node45_z node85_z node125_z node165_z node205_z"
+        << " node41_x node1641_y node1681_x node1681_y\n";
+}
+
+void append_eval_trace_if_enabled(const int iload,
+                                  const Coords& coords,
+                                  const int eval_index,
+                                  const double f,
+                                  const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+    const std::string path =
+        trace_dump_dir() + "/step" + std::to_string(iload) + "_eval_trace.dat";
+    std::ofstream out(path, std::ios::app);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+    auto coord = [&](int one_based, int axis) -> double {
+        return coords.at(static_cast<std::size_t>(one_based - 1))[axis];
+    };
+    out << std::uppercase << std::scientific << std::setprecision(16)
+        << std::setw(6) << eval_index
+        << std::setw(24) << f
+        << std::setw(24) << coord(1, 2)
+        << std::setw(24) << coord(5, 2)
+        << std::setw(24) << coord(45, 2)
+        << std::setw(24) << coord(85, 2)
+        << std::setw(24) << coord(125, 2)
+        << std::setw(24) << coord(165, 2)
+        << std::setw(24) << coord(205, 2)
+        << std::setw(24) << coord(41, 0)
+        << std::setw(24) << coord(1641, 1)
+        << std::setw(24) << coord(1681, 0)
+        << std::setw(24) << coord(1681, 1)
+        << "\n";
+}
+
 // ─── XNORM0 computation ───────────────────────────────────────────────────────
 // Mirrors Fortran minimize.f90 lines 43-46:
 //   dx1 = maxval(x0(1:3*numnods:3)) - minval(x0(1:3*numnods:3))
@@ -512,10 +619,30 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
 
     LbfgsSolver solver(10, eps, 1.0e-12, 20000,
                        mpi.is_root() && lbfgs_monitor_enabled());
+    write_eval_trace_header_if_enabled(trace_iload, mpi);
+    write_lbfgs_step_trace_header_if_enabled(trace_iload, mpi);
+    solver.set_accepted_step_observer([&](const int iter,
+                                          const int nfun,
+                                          const double f,
+                                          const double critc,
+                                          const double stp,
+                                          const std::vector<double>& x_trial) {
+        Coords traced_coords = state.coords;
+        load_ctrl.scatter_all(x_trial, traced_coords);
+        append_lbfgs_step_trace_if_enabled(trace_iload,
+                                          traced_coords,
+                                          iter,
+                                          nfun,
+                                          f,
+                                          critc,
+                                          stp,
+                                          mpi);
+    });
 
     EnergyComponents final_E{};
     AssemblyResult final_asm{};
     bool first_eval_dumped = false;
+    int eval_trace_index = 0;
 
     auto callback = [&](const std::vector<double>& xv)
         -> std::pair<double, std::vector<double>>
@@ -532,6 +659,8 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
         const auto res = assemble_energy_forces(input, state, mpi);
         final_asm = res;
         final_E = to_energy_components(res);
+        ++eval_trace_index;
+        append_eval_trace_if_enabled(trace_iload, state.coords, eval_trace_index, res.total_energy, mpi);
         if (!first_eval_dumped) {
             const auto forces_real = real_node_forces(res, input.mesh.numnods);
             double reaction1 = 0.0;
