@@ -29,6 +29,7 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
 
     ElementEnergyResult result;
     result.eta = eta0;  // copy initial etas; updated per Gauss point on Newton convergence
+    long double energy_accum = 0.0L;
 
     for (int igauss = 0; igauss < ngauss; ++igauss) {
         // Extract per-Gauss-point shape gradients and curvatures from shapef
@@ -152,8 +153,10 @@ ElementEnergyResult compute_element_energy(const NeighborCoords12& xneigh,
                 }
             }
         }
-        result.W_elem += W * weight;
+        energy_accum += static_cast<long double>(W) * static_cast<long double>(weight);
     }
+
+    result.W_elem = static_cast<double>(energy_accum);
 
     return result;
 }

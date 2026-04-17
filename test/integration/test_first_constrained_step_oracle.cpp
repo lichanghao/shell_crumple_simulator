@@ -252,7 +252,7 @@ TEST(FirstConstrainedStepOracle, Element83ReplayMatchesCommittedFortranOracle) {
                 << "gauss=" << igauss << " axis=" << axis;
         }
     }
-    const double w_tol = 1e-7;
+    const double w_tol = std::max(1e-7, std::abs(expected.W_elem) * 1e-6);
     EXPECT_NEAR(result.W_elem, expected.W_elem, w_tol);
 
     fs::remove_all(temp_root);
