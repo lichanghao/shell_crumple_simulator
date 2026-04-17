@@ -179,3 +179,13 @@ Solution: When tracing or reconstructing the first constrained-step state, start
 Constraints: This rule applies to the current executable-path solver structure where `apply_imperfections()` runs before constrained L-BFGS and `scatter_all()` restores BC DOFs from `x0_BC`. It does not imply free DOFs lose the imperfection, and it does not by itself explain later replay-row drift.
 Validation Evidence: `E2ECyclicRuntime.TraceDumpsCaptureCyclicReplayCheckpoints` passes after tracing `before_first_eval` and checking that free DOFs match `after_imperfection` while BC DOFs match `after_increment`; the same pattern matches the existing compression first-constrained-step oracle reconstruction.
 Source Rounds: 2
+
+## Lesson: cyclic-replay-divergence-starts-after-first-eval
+Lesson ID: BL-20260417-cyclic-divergence-after-first-eval
+Scope: test/cases/graphene_cyclic_crumple, src/core/solver.cpp, test/integration/test_e2e_compression.cpp, cyclic replay debugging
+Problem Description: The cyclic replay failure could have originated either before the first constrained energy evaluation (bad increment/imperfection state) or later during the constrained solve/output path. Without fixture-backed checkpoints, the team had to infer that boundary from row-level drift alone.
+Root Cause: The repository originally had replay fixtures only for the final step-one energy/force rows and post-free coordinates. There were no committed same-trace Fortran checkpoints bracketing the constrained solve, so the first actual divergence point in the cyclic path was unobservable.
+Solution: Capture same-trace Fortran fixtures for `before_first_eval` and `before_output` and add direct regression checks for them. In the current tree, `before_first_eval` matches between C++ and Fortran within tight tolerance and both `before_first_eval_eta` and `before_output_eta` also match, while `before_output` coordinates and summary already diverge materially. Use that to focus debugging on the constrained solve/update path after the first evaluation rather than on increment/imperfection setup.
+Constraints: This lesson is specific to the committed cyclic `nCodeLoad=31` replay fixtures and the current executable-path structure. It narrows where the bug lives; it does not itself fix the mismatch.
+Validation Evidence: `E2ECyclicRuntime.BeforeFirstEvalTraceMatchesCommittedFortranReplayFixture` passes, `E2ECyclicRuntime.BeforeOutputTraceShowsFirstMaterialReplayDivergence` passes, and `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` still fails with unchanged row drift.
+Source Rounds: 3
