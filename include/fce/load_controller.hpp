@@ -35,11 +35,13 @@ public:
     // This is the full "long" operation that also restores BC nodes.
     void scatter_all(const std::vector<double>& x_free, Coords& coords) const;
 
-    // Compute reaction forces for nCodeLoad=3.
+    // Compute reaction forces using the Fortran get_reac nCodeLoad=3 rule.
+    // The cyclic pasapas path (nCodeLoad=30/31) explicitly calls get_reac(..., 3, ...),
+    // so the same z-DOF accumulation rule applies there as well.
     // forces_flat is a flat vector of size 3*numnods (real nodes only, after ghost folding).
     // Mirrors Fortran get_reac (nCodeLoad=3):
     //   reaction1 += forces(mdofBC(3*i)) for mnodBC(i,2)==1
-    //   reaction2 += forces(mdofBC(3*i)) for mnodBC(i,2)==2
+    //   reaction2 += forces(mdofBC(3*i)) for every other boundary tag
     // where i goes 1..nnodBC (1-based Fortran) = mdofBC[3*i-1]=mdofBC[3*(i-1)+2] 0-based.
     void compute_reaction(const std::vector<double>& forces_flat,
                           double& reaction1, double& reaction2) const;

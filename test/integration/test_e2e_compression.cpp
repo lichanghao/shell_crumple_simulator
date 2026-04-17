@@ -99,6 +99,26 @@ std::vector<fce::Vec3> read_fortran_coord_dump(const fs::path& path);
 
 double relative_error(double actual, double expected, double floor);
 
+std::pair<double, double> expected_reaction_from_get_reac_ncode3(
+    const fce::BCData& bcs,
+    const std::vector<double>& forces_flat) {
+    double reaction1 = 0.0;
+    double reaction2 = 0.0;
+
+    for (int i = 0; i < bcs.nnodBC; ++i) {
+        const std::size_t mdof_idx = static_cast<std::size_t>(3 * i + 2);
+        const int flat_dof = bcs.mdofBC.at(mdof_idx);
+        const double force_val = forces_flat.at(static_cast<std::size_t>(flat_dof));
+        if (bcs.mnodBC.at(static_cast<std::size_t>(i))[1] == 0) {
+            reaction1 += force_val;
+        } else {
+            reaction2 += force_val;
+        }
+    }
+
+    return {reaction1, reaction2};
+}
+
 std::vector<DataRow> read_numeric_rows(const fs::path& path, const bool skip_header) {
     std::ifstream in(path);
     if (!in) {
@@ -1476,12 +1496,8 @@ TEST_F(E2ECyclicRuntime, GeneratedStepOneVtuMatchesGeneratedEnergyAndReactionRow
     std::vector<double> forces_real(
         assembly.force.begin(),
         assembly.force.begin() + 3 * input.mesh.numnods);
-    fce::LoadController load_ctrl(input.bcs);
-    load_ctrl.init(state.coords);
-
-    double reaction1 = 0.0;
-    double reaction2 = 0.0;
-    load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+    const auto [reaction1, reaction2] =
+        expected_reaction_from_get_reac_ncode3(input.bcs, forces_real);
 
     EXPECT_LE(relative_error(reaction1,
                              fce::io::parse_fortran_double(force_tokens[3]),

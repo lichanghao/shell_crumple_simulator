@@ -168,6 +168,10 @@ void LoadController::compute_reaction(const std::vector<double>& forces_flat,
     //     else                    reaction2 += forces(mdofBC(3*i))
     //   end do
     //
+    // pasapas.f90 uses this same rule for nCodeLoad=30/31 by calling
+    // get_reac(mesh0, forces, 3, ...), so the production cyclic path also
+    // routes every non-side-1 boundary node into reaction2.
+    //
     // Translation to 0-based C++:
     //   Fortran i goes 1..nnodBC (1-based); mdofBC(3*i) is 1-based.
     //   For Fortran i: mdofBC(3*i) → 0-based index mdofBC[3*i - 1].
