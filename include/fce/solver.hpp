@@ -67,7 +67,8 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
                                      RuntimeState& state,
                                      LoadController& load_ctrl,
                                      const MpiEnv& mpi,
-                                     double eps);
+                                     double eps,
+                                     int trace_iload = 0);
 
 // ─── pasapas ─────────────────────────────────────────────────────────────────
 // Mirrors Fortran pasapas.f90 for nCodeLoad=3.

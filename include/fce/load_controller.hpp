@@ -18,8 +18,7 @@ public:
     void init(const Coords& coords);
 
     // Apply the load increment for step iload (1-based, matching Fortran iload_start..nloadstep).
-    // Updates coords at BC DOF positions (mirrors Fortran load_doit nCodeLoad=3).
-    // Throws std::runtime_error for nCodeLoad=30/31.
+    // Updates coords at BC DOF positions (mirrors Fortran load_doit for nCodeLoad=3/30/31).
     void apply_increment(int iload, Coords& coords);
 
     // Extract free-DOF values from coords into a short vector.

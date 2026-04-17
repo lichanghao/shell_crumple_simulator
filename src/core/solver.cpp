@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -50,17 +51,18 @@ std::string trace_dump_dir() {
     return std::string(raw);
 }
 
+bool trace_enabled_for_step(const int iload, const MpiEnv& mpi) {
+    return !trace_dump_dir().empty() && mpi.is_root() && iload == 1;
+}
+
 void write_coord_dump_if_enabled(const RuntimeState& state,
                                  const std::string& stage,
                                  const int iload,
                                  const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
     const std::string dir = trace_dump_dir();
-    if (dir.empty() || !mpi.is_root()) {
-        return;
-    }
-    if (iload != 1) {
-        return;
-    }
 
     const std::string path = dir + "/step" + std::to_string(iload) + "_" + stage + ".dat";
     std::ofstream out(path, std::ios::out | std::ios::trunc);
@@ -107,21 +109,11 @@ void write_eta_dump_if_enabled(const RuntimeState& state,
     }
 }
 
-void write_reaction_dump_if_enabled(const BCData& bcs,
-                                    const std::vector<double>& forces_flat,
-                                    const double reaction1,
-                                    const double reaction2,
-                                    const int iload,
-                                    const MpiEnv& mpi) {
-    const std::string dir = trace_dump_dir();
-    if (dir.empty() || !mpi.is_root()) {
-        return;
-    }
-    if (iload != 1) {
-        return;
-    }
-
-    const std::string path = dir + "/step" + std::to_string(iload) + "_reaction.dat";
+void write_reaction_dump(const std::string& path,
+                         const BCData& bcs,
+                         const std::vector<double>& forces_flat,
+                         const double reaction1,
+                         const double reaction2) {
     std::ofstream out(path, std::ios::out | std::ios::trunc);
     if (!out) {
         throw std::runtime_error("cannot open " + path);
@@ -154,6 +146,61 @@ void write_reaction_dump_if_enabled(const BCData& bcs,
 
     out << "# reaction1 " << reaction1 << "\n";
     out << "# reaction2 " << reaction2 << "\n";
+}
+
+void write_reaction_dump_if_enabled(const std::string& stage,
+                                    const BCData& bcs,
+                                    const std::vector<double>& forces_flat,
+                                    const double reaction1,
+                                    const double reaction2,
+                                    const int iload,
+                                    const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+    const std::string dir = trace_dump_dir();
+    write_reaction_dump(dir + "/step" + std::to_string(iload) + "_" + stage + "_reaction.dat",
+                        bcs,
+                        forces_flat,
+                        reaction1,
+                        reaction2);
+    if (stage == "before_output") {
+        write_reaction_dump(dir + "/step" + std::to_string(iload) + "_reaction.dat",
+                            bcs,
+                            forces_flat,
+                            reaction1,
+                            reaction2);
+    }
+}
+
+void write_summary_dump_if_enabled(const std::string& stage,
+                                   const EnergyComponents& energy,
+                                   const double total_energy,
+                                   const double reduced_energy,
+                                   const double gnorm,
+                                   const int inner_fail,
+                                   const int iload,
+                                   const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+
+    const std::string path =
+        trace_dump_dir() + "/step" + std::to_string(iload) + "_" + stage + "_summary.dat";
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+
+    out << std::uppercase << std::scientific << std::setprecision(16);
+    out << "E_total " << energy.E_total << "\n";
+    out << "E_internal " << energy.E_internal << "\n";
+    out << "E_vdw " << energy.E_vdw << "\n";
+    out << "E_external " << energy.E_external << "\n";
+    out << "assembly_total_energy " << total_energy << "\n";
+    out << "assembly_reduced_energy " << reduced_energy << "\n";
+    out << "GNORM " << gnorm << "\n";
+    out << "inner_fail " << inner_fail << "\n";
 }
 
 // ─── XNORM0 computation ───────────────────────────────────────────────────────
@@ -453,7 +500,8 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
                                      RuntimeState& state,
                                      LoadController& load_ctrl,
                                      const MpiEnv& mpi,
-                                     double eps) {
+                                     double eps,
+                                     const int trace_iload) {
     const BCData& bcs = input.bcs;
 
     // Compute XNORM0 from initial coords bbox (mirrors Fortran minimize.f90 lines 43-46).
@@ -467,6 +515,7 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
 
     EnergyComponents final_E{};
     AssemblyResult final_asm{};
+    bool first_eval_dumped = false;
 
     auto callback = [&](const std::vector<double>& xv)
         -> std::pair<double, std::vector<double>>
@@ -474,11 +523,37 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
         // Mirror Fortran long(...): scatter free DOFs and restore BC DOFs
         // from x0_BC before each energy evaluation.
         load_ctrl.scatter_all(xv, state.coords);
+        if (!first_eval_dumped) {
+            write_coord_dump_if_enabled(state, "before_first_eval", trace_iload, mpi);
+            write_eta_dump_if_enabled(state, "before_first_eval", trace_iload, mpi);
+        }
 
         // Assemble.
         const auto res = assemble_energy_forces(input, state, mpi);
         final_asm = res;
         final_E = to_energy_components(res);
+        if (!first_eval_dumped) {
+            const auto forces_real = real_node_forces(res, input.mesh.numnods);
+            double reaction1 = 0.0;
+            double reaction2 = 0.0;
+            load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+            write_summary_dump_if_enabled("before_first_eval",
+                                          final_E,
+                                          res.total_energy,
+                                          res.reduced_energy,
+                                          std::numeric_limits<double>::quiet_NaN(),
+                                          res.inner_fail,
+                                          trace_iload,
+                                          mpi);
+            write_reaction_dump_if_enabled("before_first_eval",
+                                           bcs,
+                                           forces_real,
+                                           reaction1,
+                                           reaction2,
+                                           trace_iload,
+                                           mpi);
+            first_eval_dumped = true;
+        }
 
         // Gradient at free DOFs.
         return {res.total_energy, extract_free_gradient(res, bcs)};
@@ -598,16 +673,32 @@ void pasapas(const SimulatorInput& input,
         write_coord_dump_if_enabled(state, "after_imperfection", iload, mpi);
 
         // Constrained minimisation.
-        auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps);
+        auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps, iload);
         write_coord_dump_if_enabled(state, "after_minimize", iload, mpi);
         write_eta_dump_if_enabled(state, "after_minimize", iload, mpi);
+        write_coord_dump_if_enabled(state, "before_output", iload, mpi);
+        write_eta_dump_if_enabled(state, "before_output", iload, mpi);
 
         // Reuse the last converged assembly, matching the Fortran runtime path.
         const auto forces_real = real_node_forces(min_res.assembly, input.mesh.numnods);
 
         double reaction1 = 0.0, reaction2 = 0.0;
         load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
-        write_reaction_dump_if_enabled(bcs, forces_real, reaction1, reaction2, iload, mpi);
+        write_summary_dump_if_enabled("before_output",
+                                      min_res.E,
+                                      min_res.assembly.total_energy,
+                                      min_res.assembly.reduced_energy,
+                                      min_res.gnorm,
+                                      min_res.assembly.inner_fail,
+                                      iload,
+                                      mpi);
+        write_reaction_dump_if_enabled("before_output",
+                                       bcs,
+                                       forces_real,
+                                       reaction1,
+                                       reaction2,
+                                       iload,
+                                       mpi);
 
         const double load_param = bcs.value * static_cast<double>(iload) /
                                   static_cast<double>(bcs.nloadstep);

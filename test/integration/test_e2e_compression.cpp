@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -215,6 +216,21 @@ std::vector<double> read_trace_values(const fs::path& path) {
     std::string token;
     while (in >> token) {
         values.push_back(fce::io::parse_fortran_double(token));
+    }
+    return values;
+}
+
+std::map<std::string, double> read_scalar_dump(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open scalar dump: " + path.string());
+    }
+
+    std::map<std::string, double> values;
+    std::string key;
+    std::string token;
+    while (in >> key >> token) {
+        values[key] = fce::io::parse_fortran_double(token);
     }
     return values;
 }
@@ -1509,6 +1525,94 @@ TEST_F(E2ECyclicRuntime, GeneratedStepOneVtuMatchesGeneratedEnergyAndReactionRow
                              1e-12),
               1e-3)
         << "generated cyclic step-one VTU vs generated force.dat reaction2";
+}
+
+TEST_F(E2ECyclicRuntime, TraceDumpsCaptureCyclicReplayCheckpoints) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+
+    const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace";
+    fs::create_directories(dump_dir);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const std::string env_prefix = "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
+
+    const fs::path after_increment = dump_dir / "step1_after_increment.dat";
+    const fs::path after_imperfection = dump_dir / "step1_after_imperfection.dat";
+    const fs::path before_first_eval = dump_dir / "step1_before_first_eval.dat";
+    const fs::path before_first_eval_eta = dump_dir / "step1_before_first_eval_eta.dat";
+    const fs::path before_first_eval_summary = dump_dir / "step1_before_first_eval_summary.dat";
+    const fs::path before_first_eval_reaction = dump_dir / "step1_before_first_eval_reaction.dat";
+    const fs::path before_output = dump_dir / "step1_before_output.dat";
+    const fs::path before_output_eta = dump_dir / "step1_before_output_eta.dat";
+    const fs::path before_output_summary = dump_dir / "step1_before_output_summary.dat";
+    const fs::path before_output_reaction = dump_dir / "step1_before_output_reaction.dat";
+    const fs::path legacy_reaction = dump_dir / "step1_reaction.dat";
+
+    for (const auto& path : {after_increment,
+                             after_imperfection,
+                             before_first_eval,
+                             before_first_eval_eta,
+                             before_first_eval_summary,
+                             before_first_eval_reaction,
+                             before_output,
+                             before_output_eta,
+                             before_output_summary,
+                             before_output_reaction,
+                             legacy_reaction}) {
+        EXPECT_TRUE(fs::exists(path)) << "missing trace artifact " << path;
+    }
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    const auto after_increment_coords = read_fortran_coord_dump(after_increment);
+    const auto after_imperfection_coords = read_fortran_coord_dump(after_imperfection);
+    auto expected_before_first_eval = after_imperfection_coords;
+    for (const int dof : input.bcs.mdofBC) {
+        const int node = dof / 3;
+        const int axis = dof % 3;
+        expected_before_first_eval.at(static_cast<std::size_t>(node))[axis] =
+            after_increment_coords.at(static_cast<std::size_t>(node))[axis];
+    }
+
+    const auto before_first_eval_coords = read_fortran_coord_dump(before_first_eval);
+    ASSERT_EQ(expected_before_first_eval.size(), before_first_eval_coords.size());
+    for (std::size_t inode = 0; inode < expected_before_first_eval.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(before_first_eval_coords[inode][axis],
+                        expected_before_first_eval[inode][axis],
+                        1e-12)
+                << "inode=" << inode << " axis=" << axis;
+        }
+    }
+
+    const auto output_summary = read_scalar_dump(before_output_summary);
+    const auto first_eval_summary_values = read_scalar_dump(before_first_eval_summary);
+    const auto energy_tokens = last_data_tokens(temp_case_dir_ / "energy.dat");
+    const auto force_tokens = last_data_tokens(temp_case_dir_ / "force.dat");
+    ASSERT_GE(energy_tokens.size(), 8U);
+    ASSERT_GE(force_tokens.size(), 5U);
+
+    EXPECT_TRUE(std::isnan(first_eval_summary_values.at("GNORM")));
+    EXPECT_LE(relative_error(output_summary.at("E_total"),
+                             fce::io::parse_fortran_double(energy_tokens[3]),
+                             1e-12),
+              1e-6);
+    EXPECT_LE(relative_error(output_summary.at("E_internal"),
+                             fce::io::parse_fortran_double(energy_tokens[4]),
+                             1e-12),
+              1e-6);
+    EXPECT_LE(relative_error(output_summary.at("GNORM"),
+                             fce::io::parse_fortran_double(energy_tokens[7]),
+                             1e-12),
+              1e-6);
+
+    const auto reaction_lines = read_file(before_output_reaction);
+    EXPECT_NE(reaction_lines.find("# reaction1"), std::string::npos);
+    EXPECT_NE(reaction_lines.find("# reaction2"), std::string::npos);
+    EXPECT_EQ(read_file(before_output_reaction), read_file(legacy_reaction));
 }
 
 TEST(CompressionCaseFiles, ArchivedAndReplayCyclicStepOneRowsAreDistinctContracts) {
