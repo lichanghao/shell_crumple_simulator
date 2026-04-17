@@ -861,6 +861,24 @@ protected:
     }
 };
 
+void configure_short_cyclic_restart_case(const fs::path& case_dir) {
+    auto general = fce::io::read_general((case_dir / "nano_general.dat").string());
+    general.imperfect = false;
+    general.fact_imp = 0.0;
+    fce::io::write_general((case_dir / "nano_general.dat").string(), general);
+    fs::remove(case_dir / "imperfection_trace.dat");
+
+    auto bcs = fce::io::read_bcs((case_dir / "nano_BCs.dat").string());
+    bcs.ncycles = 2;
+    bcs.nloadstep_comp = 1;
+    bcs.nloadstep_rel = 1;
+    bcs.nloadstep = 4;
+    bcs.value = 0.2;
+    bcs.value_comp = 0.2;
+    bcs.value_rel = 0.2;
+    fce::io::write_bcs((case_dir / "nano_BCs.dat").string(), bcs);
+}
+
 TEST(CompressionCaseFiles, ArchivedFortranImperfectionTraceFixtureIsNonSynthetic) {
     ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
 
@@ -1532,6 +1550,33 @@ TEST_F(E2ECyclicRuntime, CrunchItRejectsMalformedCheckpointAcrossRanks) {
     ASSERT_NE(std::system(command.c_str()), 0);
     const std::string output = read_file(stderr_path);
     EXPECT_NE(output.find("failed to read checkpoint"), std::string::npos);
+}
+
+TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRun) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    configure_short_cyclic_restart_case(temp_case_dir_);
+
+    const fs::path uninterrupted_root = make_temp_dir();
+    const fs::path uninterrupted_case = uninterrupted_root / "prepro_run";
+    fs::copy(temp_case_dir_, uninterrupted_case, fs::copy_options::recursive);
+
+    ASSERT_EQ(run_crunch_it(uninterrupted_case, 4), 0);
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 2), 0);
+    ASSERT_TRUE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 4), 0);
+
+    EXPECT_EQ(read_file(temp_case_dir_ / "energy.dat"),
+              read_file(uninterrupted_case / "energy.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "force.dat"),
+              read_file(uninterrupted_case / "force.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "output.dat"),
+              read_file(uninterrupted_case / "output.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "nano_final_config.dat"),
+              read_file(uninterrupted_case / "nano_final_config.dat"));
+
+    fs::remove_all(uninterrupted_root);
 }
 
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
