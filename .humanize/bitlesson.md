@@ -169,3 +169,13 @@ Solution: When debugging AC-7 step 1, compare the hidden post-`minimize_free` st
 Constraints: This lesson is about the executable-path compression replay. It does not change the public VTU contract; it only warns that the archived step-0 VTU is a pre-free-minimize artifact.
 Validation Evidence: A disposable same-trace Fortran probe on the original repo inputs wrote `pre_minimize_coords_step1.dat`; after undoing the step-1 BC increment and uniform imperfection, the recovered hidden free state still differed from the current C++ post-free state by about `4.175e-02` in `x`, `5.234e-02` in `y`, and `1.047e-01` in `z`.
 Source Rounds: 1
+
+## Lesson: constrained-step-bc-imperfections-are-restored-before-eval
+Lesson ID: BL-20260417-cyclic-bc-imperfection-restore
+Scope: src/core/solver.cpp, src/core/load_controller.cpp, test/integration/test_e2e_compression.cpp, cyclic/compression constrained-step tracing
+Problem Description: A naive trace expectation says the first constrained energy evaluation should see the exact `after_imperfection` coordinates, but the new cyclic step-one trace showed the four constrained corner nodes had already lost their uniform imperfection offsets before the first constrained assembly call.
+Root Cause: `pasapas` applies imperfections directly to `x0`, but the constrained minimizer immediately calls `long(...)`/`scatter_all(...)`, which restores every BC DOF from the cached `x0_BC` array before the first energy evaluation. Because `x0_BC` is populated before imperfection injection, boundary DOFs revert to their post-increment values while only free DOFs keep the imperfection.
+Solution: When tracing or reconstructing the first constrained-step state, start from `after_imperfection` and then overwrite every BC DOF with the corresponding `after_increment` value before comparing against the first constrained evaluation. Add explicit trace artifacts for `before_first_eval` so this restoration is visible instead of being inferred indirectly.
+Constraints: This rule applies to the current executable-path solver structure where `apply_imperfections()` runs before constrained L-BFGS and `scatter_all()` restores BC DOFs from `x0_BC`. It does not imply free DOFs lose the imperfection, and it does not by itself explain later replay-row drift.
+Validation Evidence: `E2ECyclicRuntime.TraceDumpsCaptureCyclicReplayCheckpoints` passes after tracing `before_first_eval` and checking that free DOFs match `after_imperfection` while BC DOFs match `after_increment`; the same pattern matches the existing compression first-constrained-step oracle reconstruction.
+Source Rounds: 2
