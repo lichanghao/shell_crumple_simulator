@@ -107,6 +107,55 @@ void write_eta_dump_if_enabled(const RuntimeState& state,
     }
 }
 
+void write_reaction_dump_if_enabled(const BCData& bcs,
+                                    const std::vector<double>& forces_flat,
+                                    const double reaction1,
+                                    const double reaction2,
+                                    const int iload,
+                                    const MpiEnv& mpi) {
+    const std::string dir = trace_dump_dir();
+    if (dir.empty() || !mpi.is_root()) {
+        return;
+    }
+    if (iload != 1) {
+        return;
+    }
+
+    const std::string path = dir + "/step" + std::to_string(iload) + "_reaction.dat";
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+
+    out << "# inode side_tag flat_dof fx fy fz bucket contribution\n";
+    out << std::uppercase << std::scientific << std::setprecision(16);
+
+    for (int i = 0; i < bcs.nnodBC; ++i) {
+        const std::size_t mdof_idx = static_cast<std::size_t>(3 * i + 2);
+        const int flat_dof = bcs.mdofBC.at(mdof_idx);
+        const int inode = flat_dof / 3;
+        const int side_tag = bcs.mnodBC.at(static_cast<std::size_t>(i))[1];
+        const std::size_t base = static_cast<std::size_t>(3 * inode);
+        const double fx = forces_flat.at(base);
+        const double fy = forces_flat.at(base + 1);
+        const double fz = forces_flat.at(base + 2);
+        const bool to_reaction1 = (side_tag == 0);
+
+        out << std::setw(8) << inode + 1
+            << std::setw(8) << side_tag + 1
+            << std::setw(8) << flat_dof + 1
+            << std::setw(24) << fx
+            << std::setw(24) << fy
+            << std::setw(24) << fz
+            << std::setw(8) << (to_reaction1 ? 1 : 2)
+            << std::setw(24) << fz
+            << "\n";
+    }
+
+    out << "# reaction1 " << reaction1 << "\n";
+    out << "# reaction2 " << reaction2 << "\n";
+}
+
 // ─── XNORM0 computation ───────────────────────────────────────────────────────
 // Mirrors Fortran minimize.f90 lines 43-46:
 //   dx1 = maxval(x0(1:3*numnods:3)) - minval(x0(1:3*numnods:3))
@@ -558,6 +607,7 @@ void pasapas(const SimulatorInput& input,
 
         double reaction1 = 0.0, reaction2 = 0.0;
         load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+        write_reaction_dump_if_enabled(bcs, forces_real, reaction1, reaction2, iload, mpi);
 
         const double load_param = bcs.value * static_cast<double>(iload) /
                                   static_cast<double>(bcs.nloadstep);
