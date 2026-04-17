@@ -865,6 +865,8 @@ void configure_short_cyclic_restart_case(const fs::path& case_dir) {
     auto general = fce::io::read_general((case_dir / "nano_general.dat").string());
     general.imperfect = false;
     general.fact_imp = 0.0;
+    general.crit_global = 1.0e-2;
+    general.crit_local = 1.0e-3;
     fce::io::write_general((case_dir / "nano_general.dat").string(), general);
     fs::remove(case_dir / "imperfection_trace.dat");
 
