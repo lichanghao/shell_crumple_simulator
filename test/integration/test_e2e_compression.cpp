@@ -45,6 +45,18 @@ const fs::path kCyclicReplayStepOneEnergyFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_energy.dat";
 const fs::path kCyclicReplayStepOneForceFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_force.dat";
+const fs::path kCyclicReplayBeforeFirstEvalFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_first_eval.dat";
+const fs::path kCyclicReplayBeforeFirstEvalEtaFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_first_eval_eta.dat";
+const fs::path kCyclicReplayBeforeFirstEvalSummaryFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_first_eval_summary.dat";
+const fs::path kCyclicReplayBeforeOutputFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_output.dat";
+const fs::path kCyclicReplayBeforeOutputEtaFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_output_eta.dat";
+const fs::path kCyclicReplayBeforeOutputSummaryFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_output_summary.dat";
 const fs::path kCyclicPostMinimizeFreeFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "post_minimize_free_coords.dat";
 const fs::path kSelfContactCaseDir =
@@ -233,6 +245,31 @@ std::map<std::string, double> read_scalar_dump(const fs::path& path) {
         values[key] = fce::io::parse_fortran_double(token);
     }
     return values;
+}
+
+std::vector<fce::Vec2> read_fortran_eta_dump_flat(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open Fortran eta dump: " + path.string());
+    }
+
+    std::vector<fce::Vec2> out;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        int ielem = 0;
+        int igauss = 0;
+        std::string s1;
+        std::string s2;
+        if (!(row >> ielem >> igauss >> s1 >> s2)) {
+            continue;
+        }
+        out.push_back(fce::Vec2{
+            fce::io::parse_fortran_double(s1),
+            fce::io::parse_fortran_double(s2),
+        });
+    }
+    return out;
 }
 
 StepMonitorFixture read_replay_step_one_monitor_fixture(const fs::path& path) {
@@ -1613,6 +1650,102 @@ TEST_F(E2ECyclicRuntime, TraceDumpsCaptureCyclicReplayCheckpoints) {
     EXPECT_NE(reaction_lines.find("# reaction1"), std::string::npos);
     EXPECT_NE(reaction_lines.find("# reaction2"), std::string::npos);
     EXPECT_EQ(read_file(before_output_reaction), read_file(legacy_reaction));
+}
+
+TEST_F(E2ECyclicRuntime, BeforeFirstEvalTraceMatchesCommittedFortranReplayFixture) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeFirstEvalFixture)) << "Missing cyclic first-eval coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeFirstEvalEtaFixture)) << "Missing cyclic first-eval eta fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeFirstEvalSummaryFixture)) << "Missing cyclic first-eval summary fixture";
+
+    const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_fixture";
+    fs::create_directories(dump_dir);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const std::string env_prefix = "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
+
+    const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_before_first_eval.dat");
+    const auto expected_coords = read_fortran_coord_dump(kCyclicReplayBeforeFirstEvalFixture);
+    ASSERT_EQ(actual_coords.size(), expected_coords.size());
+    double max_coord_abs = 0.0;
+    for (std::size_t inode = 0; inode < actual_coords.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            max_coord_abs = std::max(max_coord_abs,
+                                     std::abs(actual_coords[inode][axis] - expected_coords[inode][axis]));
+        }
+    }
+    EXPECT_LE(max_coord_abs, 1e-6);
+
+    const auto actual_eta = read_fortran_eta_dump_flat(dump_dir / "step1_before_first_eval_eta.dat");
+    const auto expected_eta = read_fortran_eta_dump_flat(kCyclicReplayBeforeFirstEvalEtaFixture);
+    ASSERT_EQ(actual_eta.size(), expected_eta.size());
+    double max_eta_abs = 0.0;
+    for (std::size_t i = 0; i < actual_eta.size(); ++i) {
+        for (int axis = 0; axis < 2; ++axis) {
+            max_eta_abs = std::max(max_eta_abs,
+                                   std::abs(actual_eta[i][axis] - expected_eta[i][axis]));
+        }
+    }
+    EXPECT_LE(max_eta_abs, 1e-12);
+
+    const auto actual_summary = read_scalar_dump(dump_dir / "step1_before_first_eval_summary.dat");
+    const auto expected_summary = read_scalar_dump(kCyclicReplayBeforeFirstEvalSummaryFixture);
+    for (const auto& [key, expected_value] : expected_summary) {
+        ASSERT_NE(actual_summary.find(key), actual_summary.end()) << "missing summary key " << key;
+        EXPECT_LE(relative_error(actual_summary.at(key), expected_value, 1e-12), 1e-6)
+            << "summary key " << key;
+    }
+}
+
+TEST_F(E2ECyclicRuntime, BeforeOutputTraceShowsFirstMaterialReplayDivergence) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeOutputFixture)) << "Missing cyclic pre-output coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeOutputEtaFixture)) << "Missing cyclic pre-output eta fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeOutputSummaryFixture)) << "Missing cyclic pre-output summary fixture";
+
+    const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_before_output";
+    fs::create_directories(dump_dir);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const std::string env_prefix = "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
+
+    const auto actual_eta = read_fortran_eta_dump_flat(dump_dir / "step1_before_output_eta.dat");
+    const auto expected_eta = read_fortran_eta_dump_flat(kCyclicReplayBeforeOutputEtaFixture);
+    ASSERT_EQ(actual_eta.size(), expected_eta.size());
+    double max_eta_abs = 0.0;
+    for (std::size_t i = 0; i < actual_eta.size(); ++i) {
+        for (int axis = 0; axis < 2; ++axis) {
+            max_eta_abs = std::max(max_eta_abs,
+                                   std::abs(actual_eta[i][axis] - expected_eta[i][axis]));
+        }
+    }
+    EXPECT_LE(max_eta_abs, 1e-12);
+
+    const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_before_output.dat");
+    const auto expected_coords = read_fortran_coord_dump(kCyclicReplayBeforeOutputFixture);
+    ASSERT_EQ(actual_coords.size(), expected_coords.size());
+    double max_coord_abs = 0.0;
+    for (std::size_t inode = 0; inode < actual_coords.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            max_coord_abs = std::max(max_coord_abs,
+                                     std::abs(actual_coords[inode][axis] - expected_coords[inode][axis]));
+        }
+    }
+    EXPECT_GT(max_coord_abs, 1e-1);
+
+    const auto actual_summary = read_scalar_dump(dump_dir / "step1_before_output_summary.dat");
+    const auto expected_summary = read_scalar_dump(kCyclicReplayBeforeOutputSummaryFixture);
+    EXPECT_GT(relative_error(actual_summary.at("E_total"), expected_summary.at("E_total"), 1e-12), 1e-4);
+    EXPECT_GT(relative_error(actual_summary.at("E_internal"), expected_summary.at("E_internal"), 1e-12), 1e-4);
+    EXPECT_GT(relative_error(actual_summary.at("GNORM"), expected_summary.at("GNORM"), 1e-12), 1e-2);
 }
 
 TEST(CompressionCaseFiles, ArchivedAndReplayCyclicStepOneRowsAreDistinctContracts) {
