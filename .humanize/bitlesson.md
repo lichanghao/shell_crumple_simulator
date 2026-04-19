@@ -199,3 +199,13 @@ Solution: Do not treat sampled accepted-step traces as proof of full-state parit
 Constraints: This lesson applies to replay-debugging instrumentation, not to production solver behavior. Sampled proxies are still useful for narrowing the search window; they just are not closure-quality oracles for full-state parity.
 Validation Evidence: `E2ECyclicRuntime.AcceptedLbfgsHeadMatchesCommittedFortranReplayFixture` passes, while the later full-state regressions show accepted state 2 still matches and accepted state 3 already diverges materially in coordinates with matching `eta`.
 Source Rounds: 1-2
+
+## Lesson: first-reduced-state-mismatch-can-precede-coordinate-drift
+Lesson ID: BL-20260418-gfree-before-xfree
+Scope: src/core/solver.cpp, test/cases/graphene_cyclic_crumple, test/integration/test_e2e_compression.cpp, cyclic constrained-solve replay debugging
+Problem Description: After pinning the earliest full-state coordinate divergence to accepted state 3, it was still unclear whether the root cause lived in accepted-step coordinate updates or earlier in the reduced optimization state used by L-BFGS.
+Root Cause: Coordinate checkpoints alone hide whether the free optimization variables (`x_free`, `g_free`) are already wrong before the accepted full-state coordinates visibly drift. In the cyclic replay path, `x_free` can still match while the extracted free gradient has already diverged.
+Solution: When localizing solver mismatches between accepted iterations, dump and compare `x_free` and `g_free` alongside full coordinates. If `x_free` still matches but `g_free` already diverges, focus next on gradient/force assembly or free-gradient extraction rather than on accepted-state coordinate scattering.
+Constraints: This lesson applies to accepted-step replay debugging in the current L-BFGS-based solver. It narrows the likely failure surface but does not identify the exact arithmetic bug by itself.
+Validation Evidence: `E2ECyclicRuntime.AcceptedState2MatchesCommittedFortranReplayFixture` and `E2ECyclicRuntime.AcceptedState2ShowsFirstFreeGradientDivergence` pass together, showing accepted state 2 still matches in full coordinates and `x_free` while `g_free` already differs materially from the same-trace Fortran replay.
+Source Rounds: 4

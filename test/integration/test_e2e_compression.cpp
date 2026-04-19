@@ -71,10 +71,18 @@ const fs::path kCyclicReplayAccepted2Fixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_2.dat";
 const fs::path kCyclicReplayAccepted2EtaFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_2_eta.dat";
+const fs::path kCyclicReplayAccepted2XfreeFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_2_xfree.dat";
+const fs::path kCyclicReplayAccepted2GfreeFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_2_gfree.dat";
 const fs::path kCyclicReplayAccepted3Fixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_3.dat";
 const fs::path kCyclicReplayAccepted3EtaFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_3_eta.dat";
+const fs::path kCyclicReplayAccepted3XfreeFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_3_xfree.dat";
+const fs::path kCyclicReplayAccepted3GfreeFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_3_gfree.dat";
 const fs::path kCyclicReplayAccepted55Fixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_55.dat";
 const fs::path kCyclicReplayAccepted55EtaFixture =
@@ -316,6 +324,25 @@ std::vector<std::vector<double>> read_numeric_table(const fs::path& path) {
         }
     }
     return rows;
+}
+
+std::vector<double> read_indexed_vector_dump(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open indexed vector dump: " + path.string());
+    }
+    std::vector<double> out;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        int idx = 0;
+        std::string value;
+        if (!(row >> idx >> value)) {
+            continue;
+        }
+        out.push_back(fce::io::parse_fortran_double(value));
+    }
+    return out;
 }
 
 StepMonitorFixture read_replay_step_one_monitor_fixture(const fs::path& path) {
@@ -1967,6 +1994,41 @@ TEST_F(E2ECyclicRuntime, AcceptedState2MatchesCommittedFortranReplayFixture) {
         }
     }
     EXPECT_LE(max_eta_abs, 1e-12);
+}
+
+TEST_F(E2ECyclicRuntime, AcceptedState2ShowsFirstFreeGradientDivergence) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2XfreeFixture)) << "Missing accepted-state-2 xfree fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2GfreeFixture)) << "Missing accepted-state-2 gfree fixture";
+
+    const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_accept2_free";
+    fs::create_directories(dump_dir);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const std::string env_prefix =
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3";
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
+
+    const auto actual_xfree = read_indexed_vector_dump(dump_dir / "step1_accepted_2_xfree.dat");
+    const auto expected_xfree = read_indexed_vector_dump(kCyclicReplayAccepted2XfreeFixture);
+    ASSERT_EQ(actual_xfree.size(), expected_xfree.size());
+    double max_xfree_abs = 0.0;
+    for (std::size_t i = 0; i < actual_xfree.size(); ++i) {
+        max_xfree_abs = std::max(max_xfree_abs, std::abs(actual_xfree[i] - expected_xfree[i]));
+    }
+    EXPECT_LE(max_xfree_abs, 1e-6);
+
+    const auto actual_gfree = read_indexed_vector_dump(dump_dir / "step1_accepted_2_gfree.dat");
+    const auto expected_gfree = read_indexed_vector_dump(kCyclicReplayAccepted2GfreeFixture);
+    ASSERT_EQ(actual_gfree.size(), expected_gfree.size());
+    double max_gfree_abs = 0.0;
+    for (std::size_t i = 0; i < actual_gfree.size(); ++i) {
+        max_gfree_abs = std::max(max_gfree_abs, std::abs(actual_gfree[i] - expected_gfree[i]));
+    }
+    EXPECT_GT(max_gfree_abs, 1.0);
 }
 
 TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergence) {

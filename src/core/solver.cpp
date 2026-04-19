@@ -356,6 +356,39 @@ void write_full_accepted_state_if_enabled(const int iload,
     summary_out << "GNORM " << gnorm << "\n";
 }
 
+void write_vector_dump(const std::string& path,
+                       const std::vector<double>& values) {
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path);
+    }
+    out << std::uppercase << std::scientific << std::setprecision(16);
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        out << std::setw(8) << i + 1
+            << std::setw(24) << values[i]
+            << "\n";
+    }
+}
+
+void write_selected_free_state_if_enabled(const int iload,
+                                          const int accepted_iter,
+                                          const std::vector<double>& x_free,
+                                          const std::vector<double>& g_free,
+                                          const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+    static const std::set<int> requested = accepted_state_dump_steps();
+    if (requested.find(accepted_iter) == requested.end()) {
+        return;
+    }
+
+    const std::string base = trace_dump_dir() + "/step" + std::to_string(iload) +
+                             "_accepted_" + std::to_string(accepted_iter);
+    write_vector_dump(base + "_xfree.dat", x_free);
+    write_vector_dump(base + "_gfree.dat", g_free);
+}
+
 void write_eval_trace_header_if_enabled(const int iload,
                                         const MpiEnv& mpi) {
     if (!trace_enabled_for_step(iload, mpi)) {
@@ -726,7 +759,8 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
                                           const double f,
                                           const double critc,
                                           const double stp,
-                                          const std::vector<double>& x_trial) {
+                                          const std::vector<double>& x_trial,
+                                          const std::vector<double>& g_trial) {
         Coords traced_coords = state.coords;
         load_ctrl.scatter_all(x_trial, traced_coords);
         append_lbfgs_step_trace_if_enabled(trace_iload,
@@ -743,6 +777,11 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
                                              state.eta,
                                              final_E,
                                              critc,
+                                             mpi);
+        write_selected_free_state_if_enabled(trace_iload,
+                                             iter,
+                                             x_trial,
+                                             g_trial,
                                              mpi);
     });
 

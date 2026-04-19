@@ -343,7 +343,7 @@ int LbfgsSolver::lbfgs_step(int n,
         ddx_out = ddx;
         print_monitor_iteration(iter_, nfun_, f, crit_conv_, stp, crit_conv_ <= eps_);
         if (accepted_step_observer_) {
-            accepted_step_observer_(iter_, nfun_, f, crit_conv_, stp, x);
+            accepted_step_observer_(iter_, nfun_, f, crit_conv_, stp, x, g);
         }
         if (crit_conv_ <= eps_) {
             finish_ = true;
@@ -517,7 +517,7 @@ int LbfgsSolver::lbfgs_step(int n,
         ddx_out = ddx;
         print_monitor_iteration(iter_, nfun_, f, crit_conv_, stp, crit_conv_ <= eps_);
         if (accepted_step_observer_) {
-            accepted_step_observer_(iter_, nfun_, f, crit_conv_, stp, x);
+            accepted_step_observer_(iter_, nfun_, f, crit_conv_, stp, x, g);
         }
         return (crit_conv_ <= eps_) ? 0 : 1;
     }

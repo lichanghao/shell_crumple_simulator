@@ -56,7 +56,9 @@ public:
     double raw_gnorm() const { return raw_gnorm_; }
     bool stopped_on_trial_gnorm_gate() const { return stopped_on_trial_gnorm_gate_; }
     void set_accepted_step_observer(
-        std::function<void(int, int, double, double, double, const std::vector<double>&)> observer) {
+        std::function<void(int, int, double, double, double,
+                           const std::vector<double>&,
+                           const std::vector<double>&)> observer) {
         accepted_step_observer_ = std::move(observer);
     }
 
@@ -143,7 +145,9 @@ private:
     double fy_{0.0};
     double dgy_{0.0};
     int    deriv_trace_eval_{0};
-    std::function<void(int, int, double, double, double, const std::vector<double>&)>
+    std::function<void(int, int, double, double, double,
+                       const std::vector<double>&,
+                       const std::vector<double>&)>
         accepted_step_observer_{};
 };
 
