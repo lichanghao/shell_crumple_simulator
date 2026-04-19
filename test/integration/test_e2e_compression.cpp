@@ -57,6 +57,8 @@ const fs::path kCyclicReplayBeforeOutputEtaFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_output_eta.dat";
 const fs::path kCyclicReplayBeforeOutputSummaryFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_output_summary.dat";
+const fs::path kCyclicReplayAcceptedLbfgsHeadFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_lbfgs_head.dat";
 const fs::path kCyclicPostMinimizeFreeFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "post_minimize_free_coords.dat";
 const fs::path kSelfContactCaseDir =
@@ -1784,6 +1786,44 @@ TEST_F(E2ECyclicRuntime, BeforeOutputTraceShowsFirstMaterialReplayDivergence) {
     EXPECT_GT(relative_error(actual_summary.at("E_total"), expected_summary.at("E_total"), 1e-12), 1e-4);
     EXPECT_GT(relative_error(actual_summary.at("E_internal"), expected_summary.at("E_internal"), 1e-12), 1e-4);
     EXPECT_GT(relative_error(actual_summary.at("GNORM"), expected_summary.at("GNORM"), 1e-12), 1e-2);
+}
+
+TEST_F(E2ECyclicRuntime, AcceptedLbfgsHeadMatchesCommittedFortranReplayFixture) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAcceptedLbfgsHeadFixture))
+        << "Missing cyclic accepted-step fixture";
+
+    const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_lbfgs";
+    fs::create_directories(dump_dir);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const std::string env_prefix = "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
+
+    const auto actual_rows = read_numeric_table(dump_dir / "step1_accepted_lbfgs.dat");
+    const auto expected_rows = read_numeric_table(kCyclicReplayAcceptedLbfgsHeadFixture);
+
+    ASSERT_GE(actual_rows.size(), expected_rows.size());
+    ASSERT_FALSE(expected_rows.empty());
+
+    for (std::size_t i = 0; i < expected_rows.size(); ++i) {
+        ASSERT_EQ(actual_rows[i].size(), expected_rows[i].size()) << "row " << i;
+        for (std::size_t col = 0; col < expected_rows[i].size(); ++col) {
+            double tol = 1e-5;
+            if (col == 2) {
+                tol = 5e-3;   // Fortran monitor prints F with only a few significant digits.
+            } else if (col == 3) {
+                tol = 2e-2;   // CRITC is likewise truncated in the monitor output fixture.
+            } else if (col == 4) {
+                tol = 1e-6;
+            }
+            EXPECT_NEAR(actual_rows[i][col], expected_rows[i][col], tol)
+                << "row " << i << " col " << col;
+        }
+    }
 }
 
 TEST(CompressionCaseFiles, ArchivedAndReplayCyclicStepOneRowsAreDistinctContracts) {
