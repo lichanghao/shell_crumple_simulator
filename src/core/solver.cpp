@@ -66,7 +66,18 @@ std::set<int> accepted_state_dump_steps() {
         const std::string token = text.substr(start, comma == std::string::npos ? std::string::npos
                                                                                 : comma - start);
         if (!token.empty()) {
-            steps.insert(std::stoi(token));
+            const std::size_t dash = token.find('-');
+            if (dash != std::string::npos) {
+                const int begin = std::stoi(token.substr(0, dash));
+                const int end = std::stoi(token.substr(dash + 1));
+                const int lo = std::min(begin, end);
+                const int hi = std::max(begin, end);
+                for (int value = lo; value <= hi; ++value) {
+                    steps.insert(value);
+                }
+            } else {
+                steps.insert(std::stoi(token));
+            }
         }
         if (comma == std::string::npos) {
             break;

@@ -189,3 +189,13 @@ Solution: Capture same-trace Fortran fixtures for `before_first_eval` and `befor
 Constraints: This lesson is specific to the committed cyclic `nCodeLoad=31` replay fixtures and the current executable-path structure. It narrows where the bug lives; it does not itself fix the mismatch.
 Validation Evidence: `E2ECyclicRuntime.BeforeFirstEvalTraceMatchesCommittedFortranReplayFixture` passes, `E2ECyclicRuntime.BeforeOutputTraceShowsFirstMaterialReplayDivergence` passes, and `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically` still fails with unchanged row drift.
 Source Rounds: 3
+
+## Lesson: sampled-accepted-step-proxies-can-hide-earlier-full-state-divergence
+Lesson ID: BL-20260418-accepted-step-proxy-limit
+Scope: test/cases/graphene_cyclic_crumple, src/core/solver.cpp, test/integration/test_e2e_compression.cpp, cyclic accepted-step replay debugging
+Problem Description: A sampled accepted-step head fixture built from monitor values plus a few representative coordinates suggested the first 20 accepted cyclic constrained-solve states still matched the same-trace Fortran replay, but later full-state checkpoints showed the solver had already diverged earlier than that.
+Root Cause: The proxy tracked only a handful of coordinates and monitor-truncated `f` / `critc` values. The real mismatch lived in untracked coordinates, so the sparse accepted-step summary stayed green even though the full state had already drifted.
+Solution: Do not treat sampled accepted-step traces as proof of full-state parity. Once a sampled proxy suggests the solve is still aligned, upgrade to full-state accepted-step fixtures (coords plus `eta`) at candidate accepted iterations and find the earliest iteration where the whole state exceeds tolerance.
+Constraints: This lesson applies to replay-debugging instrumentation, not to production solver behavior. Sampled proxies are still useful for narrowing the search window; they just are not closure-quality oracles for full-state parity.
+Validation Evidence: `E2ECyclicRuntime.AcceptedLbfgsHeadMatchesCommittedFortranReplayFixture` passes, while the later full-state regressions show accepted state 2 still matches and accepted state 3 already diverges materially in coordinates with matching `eta`.
+Source Rounds: 1-2
