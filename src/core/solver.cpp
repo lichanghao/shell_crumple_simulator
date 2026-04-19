@@ -19,6 +19,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <set>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -49,6 +50,30 @@ std::string trace_dump_dir() {
         return {};
     }
     return std::string(raw);
+}
+
+std::set<int> accepted_state_dump_steps() {
+    const char* raw = std::getenv("FCE_TRACE_ACCEPTED_STATE_STEPS");
+    if (raw == nullptr || *raw == '\0') {
+        return {};
+    }
+
+    std::set<int> steps;
+    std::string text(raw);
+    std::size_t start = 0;
+    while (start < text.size()) {
+        const std::size_t comma = text.find(',', start);
+        const std::string token = text.substr(start, comma == std::string::npos ? std::string::npos
+                                                                                : comma - start);
+        if (!token.empty()) {
+            steps.insert(std::stoi(token));
+        }
+        if (comma == std::string::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return steps;
 }
 
 bool trace_enabled_for_step(const int iload, const MpiEnv& mpi) {
@@ -259,6 +284,65 @@ void append_lbfgs_step_trace_if_enabled(const int iload,
         << std::setw(24) << coord(1681, 0)
         << std::setw(24) << coord(1681, 1)
         << "\n";
+}
+
+void write_full_accepted_state_if_enabled(const int iload,
+                                          const int accepted_iter,
+                                          const Coords& coords,
+                                          const EtaField& eta,
+                                          const EnergyComponents& energy,
+                                          const double gnorm,
+                                          const MpiEnv& mpi) {
+    if (!trace_enabled_for_step(iload, mpi)) {
+        return;
+    }
+    static const std::set<int> requested = accepted_state_dump_steps();
+    if (requested.find(accepted_iter) == requested.end()) {
+        return;
+    }
+
+    const std::string base = trace_dump_dir() + "/step" + std::to_string(iload) +
+                             "_accepted_" + std::to_string(accepted_iter);
+
+    std::ofstream coord_out(base + ".dat", std::ios::out | std::ios::trunc);
+    if (!coord_out) {
+        throw std::runtime_error("cannot open " + base + ".dat");
+    }
+    coord_out << std::uppercase << std::scientific << std::setprecision(16);
+    for (std::size_t inode = 0; inode < coords.size(); ++inode) {
+        const auto& p = coords[inode];
+        coord_out << std::setw(8) << inode + 1
+                  << std::setw(24) << p[0]
+                  << std::setw(24) << p[1]
+                  << std::setw(24) << p[2]
+                  << "\n";
+    }
+
+    std::ofstream eta_out(base + "_eta.dat", std::ios::out | std::ios::trunc);
+    if (!eta_out) {
+        throw std::runtime_error("cannot open " + base + "_eta.dat");
+    }
+    eta_out << std::uppercase << std::scientific << std::setprecision(16);
+    for (std::size_t ielem = 0; ielem < eta.size(); ++ielem) {
+        for (std::size_t igauss = 0; igauss < eta[ielem].size(); ++igauss) {
+            eta_out << std::setw(8) << ielem + 1
+                    << std::setw(8) << igauss + 1
+                    << std::setw(24) << eta[ielem][igauss][0]
+                    << std::setw(24) << eta[ielem][igauss][1]
+                    << "\n";
+        }
+    }
+
+    std::ofstream summary_out(base + "_summary.dat", std::ios::out | std::ios::trunc);
+    if (!summary_out) {
+        throw std::runtime_error("cannot open " + base + "_summary.dat");
+    }
+    summary_out << std::uppercase << std::scientific << std::setprecision(16);
+    summary_out << "E_total " << energy.E_total << "\n";
+    summary_out << "E_internal " << energy.E_internal << "\n";
+    summary_out << "E_vdw " << energy.E_vdw << "\n";
+    summary_out << "E_external " << energy.E_external << "\n";
+    summary_out << "GNORM " << gnorm << "\n";
 }
 
 void write_eval_trace_header_if_enabled(const int iload,
@@ -619,6 +703,11 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
 
     LbfgsSolver solver(10, eps, 1.0e-12, 20000,
                        mpi.is_root() && lbfgs_monitor_enabled());
+
+    EnergyComponents final_E{};
+    AssemblyResult final_asm{};
+    bool first_eval_dumped = false;
+    int eval_trace_index = 0;
     write_eval_trace_header_if_enabled(trace_iload, mpi);
     write_lbfgs_step_trace_header_if_enabled(trace_iload, mpi);
     solver.set_accepted_step_observer([&](const int iter,
@@ -637,12 +726,14 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
                                           critc,
                                           stp,
                                           mpi);
+        write_full_accepted_state_if_enabled(trace_iload,
+                                             iter,
+                                             traced_coords,
+                                             state.eta,
+                                             final_E,
+                                             critc,
+                                             mpi);
     });
-
-    EnergyComponents final_E{};
-    AssemblyResult final_asm{};
-    bool first_eval_dumped = false;
-    int eval_trace_index = 0;
 
     auto callback = [&](const std::vector<double>& xv)
         -> std::pair<double, std::vector<double>>

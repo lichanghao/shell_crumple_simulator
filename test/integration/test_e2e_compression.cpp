@@ -59,6 +59,14 @@ const fs::path kCyclicReplayBeforeOutputSummaryFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_before_output_summary.dat";
 const fs::path kCyclicReplayAcceptedLbfgsHeadFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_lbfgs_head.dat";
+const fs::path kCyclicReplayAccepted20Fixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_20.dat";
+const fs::path kCyclicReplayAccepted20EtaFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_20_eta.dat";
+const fs::path kCyclicReplayAccepted55Fixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_55.dat";
+const fs::path kCyclicReplayAccepted55EtaFixture =
+    fs::path(kOracleDir) / "graphene_cyclic_crumple" / "replay_step1_accepted_55_eta.dat";
 const fs::path kCyclicPostMinimizeFreeFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "post_minimize_free_coords.dat";
 const fs::path kSelfContactCaseDir =
@@ -1824,6 +1832,88 @@ TEST_F(E2ECyclicRuntime, AcceptedLbfgsHeadMatchesCommittedFortranReplayFixture) 
                 << "row " << i << " col " << col;
         }
     }
+}
+
+TEST_F(E2ECyclicRuntime, AcceptedState20ShowsCommittedFortranReplayDivergence) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted20Fixture)) << "Missing accepted-state-20 coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted20EtaFixture)) << "Missing accepted-state-20 eta fixture";
+
+    const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_accept20";
+    fs::create_directories(dump_dir);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const std::string env_prefix =
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=20";
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
+
+    const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_accepted_20.dat");
+    const auto expected_coords = read_fortran_coord_dump(kCyclicReplayAccepted20Fixture);
+    ASSERT_EQ(actual_coords.size(), expected_coords.size());
+    double max_coord_abs = 0.0;
+    for (std::size_t inode = 0; inode < actual_coords.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            max_coord_abs = std::max(max_coord_abs,
+                                     std::abs(actual_coords[inode][axis] - expected_coords[inode][axis]));
+        }
+    }
+    EXPECT_GT(max_coord_abs, 1e-3);
+
+    const auto actual_eta = read_fortran_eta_dump_flat(dump_dir / "step1_accepted_20_eta.dat");
+    const auto expected_eta = read_fortran_eta_dump_flat(kCyclicReplayAccepted20EtaFixture);
+    ASSERT_EQ(actual_eta.size(), expected_eta.size());
+    double max_eta_abs = 0.0;
+    for (std::size_t i = 0; i < actual_eta.size(); ++i) {
+        for (int axis = 0; axis < 2; ++axis) {
+            max_eta_abs = std::max(max_eta_abs,
+                                   std::abs(actual_eta[i][axis] - expected_eta[i][axis]));
+        }
+    }
+    EXPECT_LE(max_eta_abs, 1e-12);
+}
+
+TEST_F(E2ECyclicRuntime, AcceptedState55ShowsCommittedFortranReplayDivergence) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted55Fixture)) << "Missing accepted-state-55 coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted55EtaFixture)) << "Missing accepted-state-55 eta fixture";
+
+    const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_accept55";
+    fs::create_directories(dump_dir);
+    fs::copy_file(kCyclicReplayTraceFixture,
+                  temp_case_dir_ / "imperfection_trace.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const std::string env_prefix =
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=55";
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
+
+    const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_accepted_55.dat");
+    const auto expected_coords = read_fortran_coord_dump(kCyclicReplayAccepted55Fixture);
+    ASSERT_EQ(actual_coords.size(), expected_coords.size());
+    double max_coord_abs = 0.0;
+    for (std::size_t inode = 0; inode < actual_coords.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            max_coord_abs = std::max(max_coord_abs,
+                                     std::abs(actual_coords[inode][axis] - expected_coords[inode][axis]));
+        }
+    }
+    EXPECT_GT(max_coord_abs, 1e-2);
+
+    const auto actual_eta = read_fortran_eta_dump_flat(dump_dir / "step1_accepted_55_eta.dat");
+    const auto expected_eta = read_fortran_eta_dump_flat(kCyclicReplayAccepted55EtaFixture);
+    ASSERT_EQ(actual_eta.size(), expected_eta.size());
+    double max_eta_abs = 0.0;
+    for (std::size_t i = 0; i < actual_eta.size(); ++i) {
+        for (int axis = 0; axis < 2; ++axis) {
+            max_eta_abs = std::max(max_eta_abs,
+                                   std::abs(actual_eta[i][axis] - expected_eta[i][axis]));
+        }
+    }
+    EXPECT_LE(max_eta_abs, 1e-12);
 }
 
 TEST(CompressionCaseFiles, ArchivedAndReplayCyclicStepOneRowsAreDistinctContracts) {
