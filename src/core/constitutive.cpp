@@ -444,7 +444,20 @@ NewtonInnerOutput solve_inner_newton_impl(const MatData& mat,
     out.iterations = 0;
     out.fail_mode = 0;
 
-    InnerPotentialOutput current = evaluate(out.eta);
+    InnerPotentialOutput current;
+    try {
+        current = evaluate(out.eta);
+    } catch (const std::invalid_argument& ex) {
+        if (std::string(ex.what()).find("singular bond angle derivative") == std::string::npos) {
+            throw;
+        }
+        out.fail_mode = 1;
+        out.W = 0.0;
+        out.dWdeta = Vec2{0.0, 0.0};
+        out.ddWdeta = Voigt3{0.0, 0.0, 0.0};
+        out.dW_dpe = Vec6{};
+        return out;
+    }
     double test = crit * (1.0 + std::abs(current.W));
     double gnorm = norm(current.dWdeta);
 
@@ -483,13 +496,24 @@ NewtonInnerOutput solve_inner_newton_impl(const MatData& mat,
             dx = dx * (0.1 * mat.A0 / step_len);
         }
 
+        const Vec2 eta_prev = out.eta;
         out.eta = out.eta + dx;
         if (norm(out.eta) > 0.5 * mat.A0) {
             out.fail_mode = 2;
+            out.eta = eta_prev;
             break;
         }
 
-        current = evaluate(out.eta);
+        try {
+            current = evaluate(out.eta);
+        } catch (const std::invalid_argument& ex) {
+            if (std::string(ex.what()).find("singular bond angle derivative") == std::string::npos) {
+                throw;
+            }
+            out.fail_mode = 1;
+            out.eta = eta_prev;
+            break;
+        }
         test = crit * (1.0 + std::abs(current.W));
         gnorm = norm(current.dWdeta);
     }
@@ -498,7 +522,9 @@ NewtonInnerOutput solve_inner_newton_impl(const MatData& mat,
         out.fail_mode = 3;
     }
 
-    current = evaluate(out.eta);
+    if (out.fail_mode == 0) {
+        current = evaluate(out.eta);
+    }
     out.W = current.W;
     out.dWdeta = current.dWdeta;
     out.ddWdeta = current.ddWdeta;

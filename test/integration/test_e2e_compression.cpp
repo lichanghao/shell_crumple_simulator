@@ -91,6 +91,8 @@ const fs::path kCyclicPostMinimizeFreeFixture =
     fs::path(kOracleDir) / "graphene_cyclic_crumple" / "post_minimize_free_coords.dat";
 const fs::path kSelfContactCaseDir =
     fs::path(kOracleDir) / "graphene_self_contact" / "prepro_run";
+const fs::path kBilayerRuntimeCaseDir =
+    fs::path(kOracleDir) / "graphene_bilayer_twist_vdw_1000" / "prepro_run";
 const fs::path kXmlValidatorScript =
     fs::path(kOracleDir).parent_path() / "support" / "validate_vtk_xml.py";
 const fs::path kFortranTraceFixture =
@@ -988,6 +990,24 @@ protected:
     }
 };
 
+class RuntimeOutputBilayerCase : public ::testing::Test {
+protected:
+    fs::path temp_case_dir_;
+
+    void SetUp() override {
+        const fs::path temp_root = make_temp_dir();
+        temp_case_dir_ = temp_root / "prepro_run";
+        fs::copy(kBilayerRuntimeCaseDir, temp_case_dir_, fs::copy_options::recursive);
+        remove_runtime_outputs(temp_case_dir_);
+    }
+
+    void TearDown() override {
+        if (!temp_case_dir_.empty()) {
+            fs::remove_all(temp_case_dir_.parent_path());
+        }
+    }
+};
+
 class E2ECyclicRuntime : public ::testing::Test {
 protected:
     fs::path temp_case_dir_;
@@ -1270,6 +1290,39 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays)
     EXPECT_EQ(generated_datasets[0].file, oracle_datasets[0].file);
     EXPECT_NEAR(generated_datasets[1].timestep, oracle_datasets[1].timestep, 1e-12);
     EXPECT_EQ(generated_datasets[1].file, oracle_datasets[1].file);
+}
+
+TEST_F(RuntimeOutputBilayerCase, CrunchItRunsArchivedBilayerStepOneCase) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+
+    const fs::path energy_path = temp_case_dir_ / "energy.dat";
+    const fs::path force_path = temp_case_dir_ / "force.dat";
+    const fs::path output_path = temp_case_dir_ / "output.dat";
+    const fs::path pvd_path = temp_case_dir_ / "mesh_config_series.pvd";
+    const fs::path step0_vtu = temp_case_dir_ / "mesh_config_0000.vtu";
+    const fs::path step1_vtu = temp_case_dir_ / "mesh_config_0001.vtu";
+
+    ASSERT_TRUE(fs::exists(energy_path));
+    ASSERT_TRUE(fs::exists(force_path));
+    ASSERT_TRUE(fs::exists(output_path));
+    ASSERT_TRUE(fs::exists(pvd_path));
+    ASSERT_TRUE(fs::exists(step0_vtu));
+    ASSERT_TRUE(fs::exists(step1_vtu));
+
+    expect_xml_loadable({pvd_path, step0_vtu, step1_vtu});
+    EXPECT_EQ(count_output_load_steps(output_path), 1);
+
+    const auto energy_rows = read_positive_load_rows(energy_path, /*skip_header=*/true);
+    const auto force_rows = read_positive_load_rows(force_path, /*skip_header=*/false);
+    ASSERT_EQ(energy_rows.size(), 1U);
+    ASSERT_EQ(force_rows.size(), 1U);
+    for (const double value : energy_rows.front().values) {
+        EXPECT_TRUE(std::isfinite(value));
+    }
+    ASSERT_GE(force_rows.front().values.size(), 4U);
+    EXPECT_TRUE(std::isfinite(force_rows.front().values[0]));
+    EXPECT_TRUE(std::isfinite(force_rows.front().values[1]));
 }
 
 TEST_F(E2ECompression, CrunchItPostMinimizeFreeStateMatchesCanonicalFortranDump) {

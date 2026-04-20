@@ -802,45 +802,54 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     auto callback = [&](const std::vector<double>& xv)
         -> std::pair<double, std::vector<double>>
     {
-        // Mirror Fortran long(...): scatter free DOFs and restore BC DOFs
-        // from x0_BC before each energy evaluation.
-        load_ctrl.scatter_all(xv, state.coords);
-        if (!first_eval_dumped) {
-            write_coord_dump_if_enabled(state, "before_first_eval", trace_iload, mpi);
-            write_eta_dump_if_enabled(state, "before_first_eval", trace_iload, mpi);
-        }
+        try {
+            // Mirror Fortran long(...): scatter free DOFs and restore BC DOFs
+            // from x0_BC before each energy evaluation.
+            load_ctrl.scatter_all(xv, state.coords);
+            if (!first_eval_dumped) {
+                write_coord_dump_if_enabled(state, "before_first_eval", trace_iload, mpi);
+                write_eta_dump_if_enabled(state, "before_first_eval", trace_iload, mpi);
+            }
 
-        // Assemble.
-        const auto res = assemble_energy_forces(input, state, mpi);
-        final_asm = res;
-        final_E = to_energy_components(res);
-        ++eval_trace_index;
-        append_eval_trace_if_enabled(trace_iload, state.coords, eval_trace_index, res.total_energy, mpi);
-        if (!first_eval_dumped) {
-            const auto forces_real = real_node_forces(res, input.mesh.numnods);
-            double reaction1 = 0.0;
-            double reaction2 = 0.0;
-            load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
-            write_summary_dump_if_enabled("before_first_eval",
-                                          final_E,
-                                          res.total_energy,
-                                          res.reduced_energy,
-                                          std::numeric_limits<double>::quiet_NaN(),
-                                          res.inner_fail,
-                                          trace_iload,
-                                          mpi);
-            write_reaction_dump_if_enabled("before_first_eval",
-                                           bcs,
-                                           forces_real,
-                                           reaction1,
-                                           reaction2,
-                                           trace_iload,
-                                           mpi);
-            first_eval_dumped = true;
-        }
+            // Assemble.
+            const auto res = assemble_energy_forces(input, state, mpi);
+            final_asm = res;
+            final_E = to_energy_components(res);
+            ++eval_trace_index;
+            append_eval_trace_if_enabled(trace_iload, state.coords, eval_trace_index, res.total_energy, mpi);
+            if (!first_eval_dumped) {
+                const auto forces_real = real_node_forces(res, input.mesh.numnods);
+                double reaction1 = 0.0;
+                double reaction2 = 0.0;
+                if (bcs.nCodeLoad == 222 || bcs.nCodeLoad == 1000) {
+                    load_ctrl.compute_reaction(forces_real, state.coords, reaction1, reaction2);
+                } else {
+                    load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+                }
+                write_summary_dump_if_enabled("before_first_eval",
+                                              final_E,
+                                              res.total_energy,
+                                              res.reduced_energy,
+                                              std::numeric_limits<double>::quiet_NaN(),
+                                              res.inner_fail,
+                                              trace_iload,
+                                              mpi);
+                write_reaction_dump_if_enabled("before_first_eval",
+                                               bcs,
+                                               forces_real,
+                                               reaction1,
+                                               reaction2,
+                                               trace_iload,
+                                               mpi);
+                first_eval_dumped = true;
+            }
 
-        // Gradient at free DOFs.
-        return {res.total_energy, extract_free_gradient(res, bcs)};
+            // Gradient at free DOFs.
+            return {res.total_energy, extract_free_gradient(res, bcs)};
+        } catch (const std::exception& ex) {
+            throw std::runtime_error("minimize_constrained callback failed: " +
+                                     std::string(ex.what()));
+        }
     };
 
     int flag = solver.minimize(x_free, xnorm0, /*stop_on_first_trial=*/false, callback);
@@ -877,7 +886,8 @@ void pasapas(const SimulatorInput& input,
              int iload_stop) {
     const BCData& bcs = input.bcs;
 
-    if (bcs.nCodeLoad != 3 && bcs.nCodeLoad != 30 && bcs.nCodeLoad != 31) {
+    if (bcs.nCodeLoad != 3 && bcs.nCodeLoad != 30 && bcs.nCodeLoad != 31 &&
+        bcs.nCodeLoad != 222 && bcs.nCodeLoad != 1000) {
         throw std::runtime_error("pasapas: unsupported nCodeLoad " +
                                  std::to_string(bcs.nCodeLoad));
     }
@@ -966,14 +976,24 @@ void pasapas(const SimulatorInput& input,
         auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps, iload);
         write_coord_dump_if_enabled(state, "after_minimize", iload, mpi);
         write_eta_dump_if_enabled(state, "after_minimize", iload, mpi);
+        if (should_stop_after_stage("after_minimize", iload, mpi)) {
+            return;
+        }
         write_coord_dump_if_enabled(state, "before_output", iload, mpi);
         write_eta_dump_if_enabled(state, "before_output", iload, mpi);
+        if (should_stop_after_stage("before_output", iload, mpi)) {
+            return;
+        }
 
         // Reuse the last converged assembly, matching the Fortran runtime path.
         const auto forces_real = real_node_forces(min_res.assembly, input.mesh.numnods);
 
         double reaction1 = 0.0, reaction2 = 0.0;
-        load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+        if (bcs.nCodeLoad == 222 || bcs.nCodeLoad == 1000) {
+            load_ctrl.compute_reaction(forces_real, state.coords, reaction1, reaction2);
+        } else {
+            load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+        }
         write_summary_dump_if_enabled("before_output",
                                       min_res.E,
                                       min_res.assembly.total_energy,
@@ -1016,6 +1036,23 @@ void pasapas(const SimulatorInput& input,
                    << std::setw(6) << icycle
                    << std::setw(4) << iphase
                    << std::fixed << std::setprecision(9)
+                   << std::setw(17) << reaction1
+                   << std::setw(17) << reaction2
+                   << "\n";
+            } else if (bcs.nCodeLoad == 222 || bcs.nCodeLoad == 1000) {
+                ef << std::scientific << std::setprecision(5)
+                   << std::setw(14) << load_param
+                   << std::setprecision(8)
+                   << std::setw(16) << min_res.E.E_total
+                   << std::setw(16) << min_res.E.E_internal
+                   << std::setw(16) << min_res.E.E_vdw
+                   << std::setw(16) << min_res.E.E_external
+                   << std::scientific << std::setprecision(9)
+                   << std::setw(17) << min_res.gnorm
+                   << "\n";
+                ff << std::fixed << std::setprecision(9)
+                   << std::setw(17) << load_param
+                   << std::setw(17) << min_res.E_min
                    << std::setw(17) << reaction1
                    << std::setw(17) << reaction2
                    << "\n";

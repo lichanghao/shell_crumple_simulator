@@ -59,6 +59,7 @@ fce::BCData bilayer_bcs() {
         std::array<int, 2>{0, 0},
         std::array<int, 2>{1, 1},
     };
+    bcs.xc = fce::Vec3{1.0, 1.5, 0.0};
     return bcs;
 }
 
@@ -136,4 +137,26 @@ TEST(LoadController, ApplyIncrementLeavesBilayerConstraintCoordsUnchanged) {
     EXPECT_DOUBLE_EQ(coords[1][0], 4.0);
     EXPECT_DOUBLE_EQ(coords[1][1], 5.0);
     EXPECT_DOUBLE_EQ(coords[1][2], 6.0);
+}
+
+TEST(LoadController, ComputeReactionMatchesBilayerMomentSemantics) {
+    const auto bcs = bilayer_bcs();
+    fce::LoadController load_ctrl(bcs);
+    const fce::Coords coords = {
+        fce::Vec3{2.0, 3.0, 0.0},
+        fce::Vec3{4.0, 7.0, 0.0},
+    };
+    const std::vector<double> forces = {
+        10.0, 20.0, 30.0,
+        40.0, 50.0, 60.0,
+    };
+
+    double reaction1 = 0.0;
+    double reaction2 = 0.0;
+    load_ctrl.compute_reaction(forces, coords, reaction1, reaction2);
+
+    const double expected1 = 20.0 * (2.0 - bcs.xc[0]) - 10.0 * (3.0 - bcs.xc[1]);
+    const double expected2 = 50.0 * (4.0 - bcs.xc[0]) - 40.0 * (7.0 - bcs.xc[1]);
+    EXPECT_DOUBLE_EQ(reaction1, expected1);
+    EXPECT_DOUBLE_EQ(reaction2, expected2);
 }

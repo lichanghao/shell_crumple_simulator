@@ -44,6 +44,9 @@ public:
     // where i goes 1..nnodBC (1-based Fortran) = mdofBC[3*i-1]=mdofBC[3*(i-1)+2] 0-based.
     void compute_reaction(const std::vector<double>& forces_flat,
                           double& reaction1, double& reaction2) const;
+    void compute_reaction(const std::vector<double>& forces_flat,
+                          const Coords& coords,
+                          double& reaction1, double& reaction2) const;
 
     int ndof_free()    const { return bcs_.ndofOP; }
     int ndof_bc()      const { return bcs_.ndofBC; }

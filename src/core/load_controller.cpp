@@ -170,8 +170,34 @@ void LoadController::scatter_all(const std::vector<double>& x_free, Coords& coor
 
 void LoadController::compute_reaction(const std::vector<double>& forces_flat,
                                        double& reaction1, double& reaction2) const {
+    compute_reaction(forces_flat, Coords{}, reaction1, reaction2);
+}
+
+void LoadController::compute_reaction(const std::vector<double>& forces_flat,
+                                       const Coords& coords,
+                                       double& reaction1, double& reaction2) const {
     reaction1 = 0.0;
     reaction2 = 0.0;
+
+    if (bcs_.nCodeLoad == 222 || bcs_.nCodeLoad == 1000) {
+        for (int i = 0; i < bcs_.nnodBC; ++i) {
+            const std::size_t mdof_idx = static_cast<std::size_t>(3 * i);
+            const int flat_x = bcs_.mdofBC.at(mdof_idx);
+            const int flat_y = bcs_.mdofBC.at(mdof_idx + 1);
+            const double fx = forces_flat.at(static_cast<std::size_t>(flat_x));
+            const double fy = forces_flat.at(static_cast<std::size_t>(flat_y));
+            const int inode = flat_x / 3;
+            const double x = coords.at(static_cast<std::size_t>(inode))[0];
+            const double y = coords.at(static_cast<std::size_t>(inode))[1];
+            const double moment = fy * (x - bcs_.xc[0]) - fx * (y - bcs_.xc[1]);
+            if (bcs_.mnodBC.at(static_cast<std::size_t>(i))[1] == 0) {
+                reaction1 += moment;
+            } else {
+                reaction2 += moment;
+            }
+        }
+        return;
+    }
 
     // Fortran get_reac nCodeLoad==3:
     //   do i=1,BCs%nnodBC
