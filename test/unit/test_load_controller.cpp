@@ -120,6 +120,77 @@ TEST(LoadController, ComputeReactionMatchesCyclicPasapasGetReacBucketing) {
     EXPECT_DOUBLE_EQ(reaction2, 6.0 + 9.0 + 12.0);
 }
 
+TEST(LoadController, CyclicUniaxialCompressionAndReleaseMatchFortranLoadController) {
+    auto bcs = cyclic_corner_bcs();
+    bcs.nCodeLoad = 30;
+    bcs.nnodBC = 2;
+    bcs.ndofBC = 6;
+    bcs.mdofBC = {
+        0, 1, 2,
+        3, 4, 5,
+    };
+    bcs.mnodBC = {
+        std::array<int, 2>{0, 0},  // side 1 fixed
+        std::array<int, 2>{1, 1},  // side 2 moves in x
+    };
+
+    fce::LoadController load_ctrl(bcs);
+    fce::Coords coords = {
+        fce::Vec3{0.0, 0.0, 0.0},
+        fce::Vec3{10.0, 5.0, 1.0},
+    };
+
+    load_ctrl.init(coords);
+
+    load_ctrl.apply_increment(1, coords);
+    EXPECT_DOUBLE_EQ(coords[0][0], 0.0);
+    EXPECT_DOUBLE_EQ(coords[1][0], 10.0 - bcs.value_comp / static_cast<double>(bcs.nloadstep_comp));
+    EXPECT_DOUBLE_EQ(coords[1][1], 5.0);
+    EXPECT_DOUBLE_EQ(coords[1][2], 1.0);
+
+    coords[1][0] = 123.0;  // verify BC restoration uses stored x0_BC values, not transient coords.
+    load_ctrl.apply_increment(bcs.nloadstep_comp + 1, coords);
+    EXPECT_DOUBLE_EQ(coords[1][0], 10.0);
+    EXPECT_DOUBLE_EQ(coords[1][1], 5.0);
+    EXPECT_DOUBLE_EQ(coords[1][2], 1.0);
+}
+
+TEST(LoadController, CyclicBiaxialCornerTagsFollowFortranPhaseSigns) {
+    const auto bcs = cyclic_corner_bcs();
+    fce::LoadController load_ctrl(bcs);
+    fce::Coords coords = {
+        fce::Vec3{0.0, 0.0, 0.0},   // tag 1: fixed
+        fce::Vec3{10.0, 1.0, 0.0},  // tag 2: x only
+        fce::Vec3{2.0, 20.0, 0.0},  // tag 3: y only
+        fce::Vec3{30.0, 40.0, 0.0}, // tag 4: x and y
+    };
+
+    load_ctrl.init(coords);
+
+    const double dl = bcs.value_comp / static_cast<double>(bcs.nloadstep_comp);
+    load_ctrl.apply_increment(1, coords);
+    EXPECT_DOUBLE_EQ(coords[0][0], 0.0);
+    EXPECT_DOUBLE_EQ(coords[0][1], 0.0);
+    EXPECT_DOUBLE_EQ(coords[1][0], 10.0 - dl);
+    EXPECT_DOUBLE_EQ(coords[1][1], 1.0);
+    EXPECT_DOUBLE_EQ(coords[2][0], 2.0);
+    EXPECT_DOUBLE_EQ(coords[2][1], 20.0 - dl);
+    EXPECT_DOUBLE_EQ(coords[3][0], 30.0 - dl);
+    EXPECT_DOUBLE_EQ(coords[3][1], 40.0 - dl);
+
+    coords[1][0] = -999.0;
+    coords[2][1] = -999.0;
+    coords[3][0] = -999.0;
+    coords[3][1] = -999.0;
+    load_ctrl.apply_increment(bcs.nloadstep_comp + 1, coords);
+    EXPECT_DOUBLE_EQ(coords[1][0], 10.0);
+    EXPECT_DOUBLE_EQ(coords[1][1], 1.0);
+    EXPECT_DOUBLE_EQ(coords[2][0], 2.0);
+    EXPECT_DOUBLE_EQ(coords[2][1], 20.0);
+    EXPECT_DOUBLE_EQ(coords[3][0], 30.0);
+    EXPECT_DOUBLE_EQ(coords[3][1], 40.0);
+}
+
 TEST(LoadController, ApplyIncrementLeavesBilayerConstraintCoordsUnchanged) {
     const auto bcs = bilayer_bcs();
     fce::LoadController load_ctrl(bcs);
