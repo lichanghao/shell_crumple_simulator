@@ -106,7 +106,10 @@ int main(int argc, char** argv) {
                             iload_start = checkpoint.iload + 1;
                             checkpoint_found = 1;
                         }
-                    } catch (const std::exception&) {
+                    } catch (const std::exception& ex) {
+                        if (mpi.is_root()) {
+                            std::cerr << "failed to read checkpoint: " << ex.what() << "\n";
+                        }
                         checkpoint_status = -2;
                     }
                 }

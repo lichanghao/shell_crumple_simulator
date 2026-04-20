@@ -141,6 +141,13 @@ gtest_discover_tests(integration_tests
   PROPERTIES TIMEOUT 180
 )
 
+foreach(test_name IN LISTS integration_test_list)
+  if(test_name MATCHES "^E2ECyclicRuntime\\.CrunchItRejectsCheckpointWrittenWithDifferentRankCount$" OR
+     test_name MATCHES "^E2ECyclicRuntime\\.CrunchItRejectsMalformedCheckpointAcrossRanks$")
+    set_tests_properties("${test_name}" PROPERTIES RUN_SERIAL TRUE)
+  endif()
+endforeach()
+
 # Pass oracle path to tests
 target_compile_definitions(integration_tests PRIVATE
   ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
