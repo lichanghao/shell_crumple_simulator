@@ -303,6 +303,26 @@ std::vector<fce::Vec2> read_fortran_eta_dump_flat(const fs::path& path) {
     return out;
 }
 
+fce::EtaField read_fortran_eta_dump(const fs::path& path,
+                                    const int numele,
+                                    const int ngauss) {
+    fce::EtaField eta(
+        static_cast<std::size_t>(numele),
+        std::vector<fce::Vec2>(static_cast<std::size_t>(ngauss), fce::Vec2{0.0, 0.0}));
+    const auto flat = read_fortran_eta_dump_flat(path);
+    if (flat.size() != static_cast<std::size_t>(numele * ngauss)) {
+        throw std::runtime_error("Fortran eta dump size does not match the expected field size");
+    }
+    std::size_t index = 0;
+    for (int ielem = 0; ielem < numele; ++ielem) {
+        for (int igauss = 0; igauss < ngauss; ++igauss) {
+            eta.at(static_cast<std::size_t>(ielem))
+                .at(static_cast<std::size_t>(igauss)) = flat.at(index++);
+        }
+    }
+    return eta;
+}
+
 std::vector<std::vector<double>> read_numeric_table(const fs::path& path) {
     std::ifstream in(path);
     if (!in) {
@@ -1840,9 +1860,7 @@ TEST_F(E2ECyclicRuntime, BeforeFirstEvalTraceMatchesCommittedFortranReplayFixtur
     }
 }
 
-// Diagnostic-only divergence checkpoints stay disabled until the constrained
-// cyclic solver path reaches parity and these can be rewritten as parity tests.
-TEST_F(E2ECyclicRuntime, DISABLED_BeforeOutputTraceShowsFirstMaterialReplayDivergence) {
+TEST_F(E2ECyclicRuntime, BeforeOutputTraceShowsFirstMaterialReplayDivergence) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayBeforeOutputFixture)) << "Missing cyclic pre-output coord fixture";
@@ -1927,7 +1945,7 @@ TEST_F(E2ECyclicRuntime, AcceptedLbfgsHeadMatchesCommittedFortranReplayFixture) 
     }
 }
 
-TEST_F(E2ECyclicRuntime, DISABLED_AcceptedState20ShowsCommittedFortranReplayDivergence) {
+TEST_F(E2ECyclicRuntime, AcceptedState20ShowsCommittedFortranReplayDivergence) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted20Fixture)) << "Missing accepted-state-20 coord fixture";
@@ -2050,7 +2068,7 @@ TEST_F(E2ECyclicRuntime, AcceptedState2MatchesCommittedFortranReplayFixture) {
     EXPECT_LE(max_eta_abs, 1e-12);
 }
 
-TEST_F(E2ECyclicRuntime, DISABLED_AcceptedState2ShowsFirstFreeGradientDivergence) {
+TEST_F(E2ECyclicRuntime, AcceptedState2ShowsFirstFreeGradientDivergence) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2XfreeFixture)) << "Missing accepted-state-2 xfree fixture";
@@ -2085,7 +2103,48 @@ TEST_F(E2ECyclicRuntime, DISABLED_AcceptedState2ShowsFirstFreeGradientDivergence
     EXPECT_GT(max_gfree_abs, 1.0);
 }
 
-TEST_F(E2ECyclicRuntime, DISABLED_AcceptedState3ShowsFirstCommittedFortranReplayDivergence) {
+TEST_F(E2ECyclicRuntime, AcceptedState2FixtureReassemblyStillShowsFreeGradientDivergence) {
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2Fixture)) << "Missing accepted-state-2 coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2EtaFixture)) << "Missing accepted-state-2 eta fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2GfreeFixture)) << "Missing accepted-state-2 gfree fixture";
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    auto state = fce::make_runtime_state(input);
+    state.coords = read_fortran_coord_dump(kCyclicReplayAccepted2Fixture);
+    state.eta = read_fortran_eta_dump(
+        kCyclicReplayAccepted2EtaFixture, input.mesh.numele, input.dims.ngauss);
+    const auto fixture_eta = state.eta;
+
+    const auto assembly = fce::assemble_energy_forces(
+        input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
+    const auto expected_gfree = read_indexed_vector_dump(kCyclicReplayAccepted2GfreeFixture);
+
+    ASSERT_EQ(expected_gfree.size(), static_cast<std::size_t>(input.bcs.ndofOP));
+
+    double max_eta_abs = 0.0;
+    for (std::size_t ielem = 0; ielem < state.eta.size(); ++ielem) {
+        for (std::size_t igauss = 0; igauss < state.eta[ielem].size(); ++igauss) {
+            for (int axis = 0; axis < 2; ++axis) {
+                max_eta_abs = std::max(
+                    max_eta_abs,
+                    std::abs(state.eta[ielem][igauss][axis] - fixture_eta[ielem][igauss][axis]));
+            }
+        }
+    }
+    EXPECT_LE(max_eta_abs, 1e-12);
+
+    double max_gfree_abs = 0.0;
+    for (int i = 0; i < input.bcs.ndofOP; ++i) {
+        const int flat_dof = input.bcs.mdofOP.at(static_cast<std::size_t>(i));
+        const double actual = assembly.force.at(static_cast<std::size_t>(flat_dof));
+        max_gfree_abs = std::max(
+            max_gfree_abs,
+            std::abs(actual - expected_gfree.at(static_cast<std::size_t>(i))));
+    }
+    EXPECT_GT(max_gfree_abs, 1.0);
+}
+
+TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergence) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3Fixture)) << "Missing accepted-state-3 coord fixture";
@@ -2126,7 +2185,7 @@ TEST_F(E2ECyclicRuntime, DISABLED_AcceptedState3ShowsFirstCommittedFortranReplay
     EXPECT_LE(max_eta_abs, 1e-12);
 }
 
-TEST_F(E2ECyclicRuntime, DISABLED_AcceptedState55ShowsCommittedFortranReplayDivergence) {
+TEST_F(E2ECyclicRuntime, AcceptedState55ShowsCommittedFortranReplayDivergence) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted55Fixture)) << "Missing accepted-state-55 coord fixture";
