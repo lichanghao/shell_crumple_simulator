@@ -150,6 +150,16 @@ struct ContributionHit {
     int axis{0};           // 0=x,1=y,2=z
 };
 
+struct GfreeMismatchHit {
+    double abs_diff{0.0};
+    double actual{0.0};
+    double expected{0.0};
+    int free_index{0};      // 1-based
+    int flat_dof{0};        // 1-based
+    int node_index{0};      // 1-based
+    int axis{0};            // 0=x,1=y,2=z
+};
+
 std::vector<fce::Vec3> read_fortran_coord_dump(const fs::path& path);
 
 double relative_error(double actual, double expected, double floor);
@@ -303,6 +313,33 @@ std::vector<ContributionHit> compute_force_contributions_for_target(
 
     std::sort(hits.begin(), hits.end(), [](const ContributionHit& lhs, const ContributionHit& rhs) {
         return lhs.abs_value > rhs.abs_value;
+    });
+    return hits;
+}
+
+std::vector<GfreeMismatchHit> compute_gfree_mismatch_hits(const fce::SimulatorInput& input,
+                                                          const std::vector<double>& assembled_force,
+                                                          const std::vector<double>& expected_gfree) {
+    std::vector<GfreeMismatchHit> hits;
+    hits.reserve(static_cast<std::size_t>(input.bcs.ndofOP));
+
+    for (int i = 0; i < input.bcs.ndofOP; ++i) {
+        const int flat_dof_zero_based = input.bcs.mdofOP.at(static_cast<std::size_t>(i));
+        const double actual = assembled_force.at(static_cast<std::size_t>(flat_dof_zero_based));
+        const double expected = expected_gfree.at(static_cast<std::size_t>(i));
+        hits.push_back(GfreeMismatchHit{
+            std::abs(actual - expected),
+            actual,
+            expected,
+            i + 1,
+            flat_dof_zero_based + 1,
+            flat_dof_zero_based / 3 + 1,
+            flat_dof_zero_based % 3,
+        });
+    }
+
+    std::sort(hits.begin(), hits.end(), [](const GfreeMismatchHit& lhs, const GfreeMismatchHit& rhs) {
+        return lhs.abs_diff > rhs.abs_diff;
     });
     return hits;
 }
@@ -2271,6 +2308,40 @@ TEST_F(E2ECyclicRuntime, AcceptedState2FixtureContributionProbeLocalizesTopRight
     EXPECT_EQ(node_1680_x.front().element_index, 3200);
     EXPECT_EQ(node_1680_x.front().local_node, 7);
     EXPECT_GT(node_1680_x.front().abs_value, 15.0);
+}
+
+TEST_F(E2ECyclicRuntime, AcceptedState2OracleDifferenceProbeMapsTopOffendersThroughMdofOp) {
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2Fixture)) << "Missing accepted-state-2 coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2EtaFixture)) << "Missing accepted-state-2 eta fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2GfreeFixture)) << "Missing accepted-state-2 gfree fixture";
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    auto state = fce::make_runtime_state(input);
+    state.coords = read_fortran_coord_dump(kCyclicReplayAccepted2Fixture);
+    state.eta = read_fortran_eta_dump(
+        kCyclicReplayAccepted2EtaFixture, input.mesh.numele, input.dims.ngauss);
+
+    const auto assembly = fce::assemble_energy_forces(
+        input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
+    const auto expected_gfree = read_indexed_vector_dump(kCyclicReplayAccepted2GfreeFixture);
+    const auto mismatches = compute_gfree_mismatch_hits(input, assembly.force, expected_gfree);
+
+    ASSERT_GE(mismatches.size(), 3U);
+
+    EXPECT_EQ(mismatches[0].free_index, 4909);
+    EXPECT_EQ(mismatches[0].node_index, 1639);
+    EXPECT_EQ(mismatches[0].axis, 0);
+    EXPECT_GT(mismatches[0].abs_diff, 70.0);
+
+    EXPECT_EQ(mismatches[1].free_index, 4906);
+    EXPECT_EQ(mismatches[1].node_index, 1638);
+    EXPECT_EQ(mismatches[1].axis, 0);
+    EXPECT_GT(mismatches[1].abs_diff, 50.0);
+
+    EXPECT_EQ(mismatches[2].free_index, 4783);
+    EXPECT_EQ(mismatches[2].node_index, 1597);
+    EXPECT_EQ(mismatches[2].axis, 0);
+    EXPECT_GT(mismatches[2].abs_diff, 50.0);
 }
 
 TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergence) {
