@@ -52,6 +52,14 @@ std::string trace_dump_dir() {
     return std::string(raw);
 }
 
+std::string trace_stop_stage() {
+    const char* raw = std::getenv("FCE_TRACE_STOP_STAGE");
+    if (raw == nullptr) {
+        return {};
+    }
+    return std::string(raw);
+}
+
 std::set<int> accepted_state_dump_steps() {
     const char* raw = std::getenv("FCE_TRACE_ACCEPTED_STATE_STEPS");
     if (raw == nullptr || *raw == '\0') {
@@ -89,6 +97,12 @@ std::set<int> accepted_state_dump_steps() {
 
 bool trace_enabled_for_step(const int iload, const MpiEnv& mpi) {
     return !trace_dump_dir().empty() && mpi.is_root() && iload == 1;
+}
+
+bool should_stop_after_stage(const std::string& stage,
+                             const int iload,
+                             const MpiEnv& mpi) {
+    return trace_enabled_for_step(iload, mpi) && trace_stop_stage() == stage;
 }
 
 void write_coord_dump_if_enabled(const RuntimeState& state,
@@ -939,8 +953,14 @@ void pasapas(const SimulatorInput& input,
         // Apply load increment (moves BC nodes, updates coords).
         load_ctrl.apply_increment(iload, state.coords);
         write_coord_dump_if_enabled(state, "after_increment", iload, mpi);
+        if (should_stop_after_stage("after_increment", iload, mpi)) {
+            return;
+        }
         apply_imperfections(input, state, iload);
         write_coord_dump_if_enabled(state, "after_imperfection", iload, mpi);
+        if (should_stop_after_stage("after_imperfection", iload, mpi)) {
+            return;
+        }
 
         // Constrained minimisation.
         auto min_res = minimize_constrained(input, state, load_ctrl, mpi, eps, iload);

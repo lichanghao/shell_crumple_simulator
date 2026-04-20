@@ -161,6 +161,7 @@ int run_crunch_it(const fs::path& case_dir,
                   const fs::path& dump_dir) {
     const std::string command =
         "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir.string()) + " " +
+        "FCE_TRACE_STOP_STAGE=after_imperfection " +
         shell_quote(kCrunchItBin) + " " + shell_quote(case_dir) + " 1 >/dev/null 2>&1";
     return std::system(command.c_str());
 }

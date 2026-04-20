@@ -31,6 +31,7 @@ void LoadController::init(const Coords& coords) {
 // ─── apply_increment ─────────────────────────────────────────────────────────
 
 void LoadController::apply_increment(int iload, Coords& coords) {
+    (void)iload;
     const int ncode = bcs_.nCodeLoad;
 
     if (ncode == 3) {
@@ -97,6 +98,16 @@ void LoadController::apply_increment(int iload, Coords& coords) {
             }
         }
 
+        for (int k = 0; k < bcs_.ndofBC; ++k) {
+            const int flat_dof = bcs_.mdofBC.at(static_cast<std::size_t>(k));
+            const int inode = flat_dof / 3;
+            const int axis  = flat_dof % 3;
+            coords.at(static_cast<std::size_t>(inode))[axis] =
+                x0_bc_.at(static_cast<std::size_t>(k));
+        }
+    } else if (ncode == 222 || ncode == 1000) {
+        // The archived bilayer runtime keeps the constrained coordinates fixed
+        // while still running the solve/output path.
         for (int k = 0; k < bcs_.ndofBC; ++k) {
             const int flat_dof = bcs_.mdofBC.at(static_cast<std::size_t>(k));
             const int inode = flat_dof / 3;

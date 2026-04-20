@@ -47,6 +47,21 @@ fce::BCData cyclic_corner_bcs() {
     return bcs;
 }
 
+fce::BCData bilayer_bcs() {
+    fce::BCData bcs;
+    bcs.nloadstep = 1;
+    bcs.nCodeLoad = 1000;
+    bcs.nnodBC = 2;
+    bcs.ndofBC = 6;
+    bcs.ndofOP = 0;
+    bcs.mdofBC = {0, 1, 2, 3, 4, 5};
+    bcs.mnodBC = {
+        std::array<int, 2>{0, 0},
+        std::array<int, 2>{1, 1},
+    };
+    return bcs;
+}
+
 }  // namespace
 
 TEST(LoadController, ApplyIncrementUsesStoredNloadstepDenominator) {
@@ -102,4 +117,23 @@ TEST(LoadController, ComputeReactionMatchesCyclicPasapasGetReacBucketing) {
     // boundary update moves x/y constrained DOFs.
     EXPECT_DOUBLE_EQ(reaction1, 3.0);
     EXPECT_DOUBLE_EQ(reaction2, 6.0 + 9.0 + 12.0);
+}
+
+TEST(LoadController, ApplyIncrementLeavesBilayerConstraintCoordsUnchanged) {
+    const auto bcs = bilayer_bcs();
+    fce::LoadController load_ctrl(bcs);
+    fce::Coords coords = {
+        fce::Vec3{1.0, 2.0, 3.0},
+        fce::Vec3{4.0, 5.0, 6.0},
+    };
+
+    load_ctrl.init(coords);
+    load_ctrl.apply_increment(1, coords);
+
+    EXPECT_DOUBLE_EQ(coords[0][0], 1.0);
+    EXPECT_DOUBLE_EQ(coords[0][1], 2.0);
+    EXPECT_DOUBLE_EQ(coords[0][2], 3.0);
+    EXPECT_DOUBLE_EQ(coords[1][0], 4.0);
+    EXPECT_DOUBLE_EQ(coords[1][1], 5.0);
+    EXPECT_DOUBLE_EQ(coords[1][2], 6.0);
 }

@@ -241,3 +241,11 @@ TEST(SimulatorInput, CyclicCaseLoadsCreaseMetadataIntoRuntimeState) {
     EXPECT_DOUBLE_EQ(state.K0_ref.front().front()[1], 0.0);
     EXPECT_DOUBLE_EQ(state.K0_ref.front().front()[2], 0.0);
 }
+
+TEST(SimulatorInput, BilayerCaseLoadsTubePartitionsIntoRuntimeVdwData) {
+    const auto input = fce::load_simulator_input(bilayer_nwhat_case_dir().string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_FALSE(input.vdw.tub_partitions.empty());
+    EXPECT_EQ(input.vdw.tub_partitions.front().first, 0);
+    EXPECT_GT(input.vdw.tub_partitions.front().second, input.vdw.tub_partitions.front().first);
+}

@@ -5,6 +5,7 @@
 #include <array>
 #include <vector>
 #include <cstdint>
+#include <utility>
 
 namespace fce {
 
@@ -122,6 +123,7 @@ struct VdwData {
     std::vector<Vec3> x;                       // [igauss_total]
     std::vector<double> rho;                   // [igauss_total]
     std::vector<std::vector<int>> near;        // [igauss_total][0..n]
+    std::vector<std::pair<int, int>> tub_partitions; // [tube][start,end) in gauss-point index space
     double xc0{0.0};
     double yc0{0.0};
     int    nself_contact{0};   // 1=same-sheet self-contact mode

@@ -169,6 +169,9 @@ SimulatorInput load_simulator_input(const std::string& case_dir) {
                                  input.dims.ng_tot,
                                  input.dims.ngauss_vdw,
                                  input.dims.nneigh);
+        if (std::filesystem::exists(base / "nano_tub_loc.dat")) {
+            input.vdw.tub_partitions = io::read_tub_loc((base / "nano_tub_loc.dat").string());
+        }
     }
     input.imperfection_trace = read_imperfection_trace(base / "imperfection_trace.dat");
     input.bcs = io::read_bcs((base / "nano_BCs.dat").string());
