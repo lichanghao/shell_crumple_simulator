@@ -1,4 +1,6 @@
 #include "fce/io.hpp"
+#include "fce/element_energy.hpp"
+#include "fce/ghost_nodes.hpp"
 #include "fce/lbfgs.hpp"
 #include "fce/load_controller.hpp"
 #include "fce/runtime_output.hpp"
@@ -139,6 +141,15 @@ struct EvalRow {
     double function_value{0.0};
 };
 
+struct ContributionHit {
+    double abs_value{0.0};
+    double contribution{0.0};
+    int element_index{0};  // 1-based
+    int local_node{0};     // 1-based
+    int node_index{0};     // 1-based
+    int axis{0};           // 0=x,1=y,2=z
+};
+
 std::vector<fce::Vec3> read_fortran_coord_dump(const fs::path& path);
 
 double relative_error(double actual, double expected, double floor);
@@ -209,6 +220,91 @@ std::vector<DataRow> read_positive_load_rows(const fs::path& path, const bool sk
         }
     }
     return filtered;
+}
+
+fce::FlatCoords flatten_coords_for_test(const fce::Coords& coords) {
+    fce::FlatCoords flat;
+    flat.reserve(coords.size() * 3);
+    for (const auto& xyz : coords) {
+        flat.push_back(xyz[0]);
+        flat.push_back(xyz[1]);
+        flat.push_back(xyz[2]);
+    }
+    return flat;
+}
+
+fce::NeighborCoords12 gather_neighbor_patch_for_test(const fce::Mesh& mesh,
+                                                     const fce::FlatCoords& coords_with_ghosts,
+                                                     const int element_index) {
+    fce::NeighborCoords12 xneigh{};
+    const auto& element = mesh.connect.at(static_cast<std::size_t>(element_index));
+    const int total_nodes = mesh.numnods + mesh.nedge;
+
+    for (int inode = 0; inode < 12; ++inode) {
+        const int node_index = element.neigh_vert[inode];
+        if (node_index < 0 || node_index >= total_nodes) {
+            throw std::runtime_error("neighbor patch references an invalid node index");
+        }
+        const std::size_t base = static_cast<std::size_t>(3 * node_index);
+        xneigh[inode] = fce::Vec3{
+            coords_with_ghosts.at(base),
+            coords_with_ghosts.at(base + 1),
+            coords_with_ghosts.at(base + 2),
+        };
+    }
+
+    return xneigh;
+}
+
+std::vector<ContributionHit> compute_force_contributions_for_target(
+    const fce::SimulatorInput& input,
+    const fce::Coords& coords,
+    const fce::EtaField& eta,
+    const int target_node_zero_based,
+    const int axis) {
+    fce::FlatCoords coords_with_ghosts = flatten_coords_for_test(coords);
+    coords_with_ghosts.resize(static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)));
+    fce::ghost_nodes(input.mesh, coords_with_ghosts);
+
+    std::vector<ContributionHit> hits;
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        const auto xneigh = gather_neighbor_patch_for_test(input.mesh, coords_with_ghosts, ielem);
+        std::vector<fce::Voigt3> reference_curvature(
+            static_cast<std::size_t>(input.dims.ngauss), fce::Voigt3{0.0, 0.0, 0.0});
+        const auto elem = fce::compute_element_energy(
+            xneigh,
+            input.ref_config.at(static_cast<std::size_t>(ielem)).F0,
+            reference_curvature,
+            input.gauss,
+            input.general.mat,
+            input.general.nW_hat,
+            input.general.crit_local,
+            100,
+            eta.at(static_cast<std::size_t>(ielem)));
+        const double scale = input.ref_config.at(static_cast<std::size_t>(ielem)).J0 / 2.0;
+        const auto& connect = input.mesh.connect.at(static_cast<std::size_t>(ielem));
+
+        for (int inode = 0; inode < 12; ++inode) {
+            const int node_index = connect.neigh_vert[inode];
+            if (node_index != target_node_zero_based) {
+                continue;
+            }
+            const double contribution = elem.f_elem[inode][axis] * scale;
+            hits.push_back(ContributionHit{
+                std::abs(contribution),
+                contribution,
+                ielem + 1,
+                inode + 1,
+                node_index + 1,
+                axis,
+            });
+        }
+    }
+
+    std::sort(hits.begin(), hits.end(), [](const ContributionHit& lhs, const ContributionHit& rhs) {
+        return lhs.abs_value > rhs.abs_value;
+    });
+    return hits;
 }
 
 fs::path make_temp_dir() {
@@ -2142,6 +2238,39 @@ TEST_F(E2ECyclicRuntime, AcceptedState2FixtureReassemblyStillShowsFreeGradientDi
             std::abs(actual - expected_gfree.at(static_cast<std::size_t>(i))));
     }
     EXPECT_GT(max_gfree_abs, 1.0);
+}
+
+TEST_F(E2ECyclicRuntime, AcceptedState2FixtureContributionProbeLocalizesTopRightCorner) {
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2Fixture)) << "Missing accepted-state-2 coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2EtaFixture)) << "Missing accepted-state-2 eta fixture";
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    const auto coords = read_fortran_coord_dump(kCyclicReplayAccepted2Fixture);
+    const auto eta = read_fortran_eta_dump(
+        kCyclicReplayAccepted2EtaFixture, input.mesh.numele, input.dims.ngauss);
+
+    const auto node_1639_x = compute_force_contributions_for_target(
+        input, coords, eta, /*target_node_zero_based=*/1638, /*axis=*/0);
+    const auto node_1639_y = compute_force_contributions_for_target(
+        input, coords, eta, /*target_node_zero_based=*/1638, /*axis=*/1);
+    const auto node_1680_x = compute_force_contributions_for_target(
+        input, coords, eta, /*target_node_zero_based=*/1679, /*axis=*/0);
+
+    ASSERT_FALSE(node_1639_x.empty());
+    ASSERT_FALSE(node_1639_y.empty());
+    ASSERT_FALSE(node_1680_x.empty());
+
+    EXPECT_EQ(node_1639_x.front().element_index, 3200);
+    EXPECT_EQ(node_1639_x.front().local_node, 11);
+    EXPECT_GT(node_1639_x.front().abs_value, 20.0);
+
+    EXPECT_EQ(node_1639_y.front().element_index, 3200);
+    EXPECT_EQ(node_1639_y.front().local_node, 11);
+    EXPECT_GT(node_1639_y.front().abs_value, 10.0);
+
+    EXPECT_EQ(node_1680_x.front().element_index, 3200);
+    EXPECT_EQ(node_1680_x.front().local_node, 7);
+    EXPECT_GT(node_1680_x.front().abs_value, 15.0);
 }
 
 TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergence) {
