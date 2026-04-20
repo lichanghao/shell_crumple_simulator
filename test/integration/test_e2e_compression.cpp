@@ -2531,6 +2531,7 @@ TEST_F(E2ECyclicRuntime, CrunchItRejectsMalformedCheckpointAcrossRanks) {
     ASSERT_NE(std::system(command.c_str()), 0);
     const std::string output = read_file(stderr_path);
     EXPECT_NE(output.find("failed to read checkpoint"), std::string::npos);
+    EXPECT_NE(output.find("checkpoint nodal positions has too few columns"), std::string::npos);
 }
 
 TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRun) {

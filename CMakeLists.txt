@@ -138,15 +138,10 @@ target_include_directories(integration_tests PRIVATE
 )
 gtest_discover_tests(integration_tests
   TEST_LIST integration_test_list
-  PROPERTIES TIMEOUT 180
+  PROPERTIES
+    TIMEOUT 180
+    RUN_SERIAL TRUE
 )
-
-foreach(test_name IN LISTS integration_test_list)
-  if(test_name MATCHES "^E2ECyclicRuntime\\.CrunchItRejectsCheckpointWrittenWithDifferentRankCount$" OR
-     test_name MATCHES "^E2ECyclicRuntime\\.CrunchItRejectsMalformedCheckpointAcrossRanks$")
-    set_tests_properties("${test_name}" PROPERTIES RUN_SERIAL TRUE)
-  endif()
-endforeach()
 
 # Pass oracle path to tests
 target_compile_definitions(integration_tests PRIVATE
