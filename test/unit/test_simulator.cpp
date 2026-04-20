@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,43 @@ double relative_tolerance(double expected) {
 
 fs::path archived_case_dir() {
     return fs::path(ORACLE_DIR) / "graphene_compression_simulator" / "np1";
+}
+
+bool is_source_backed_runtime_artifact(const fs::path& path) {
+    const std::string git_root_cmd = "git rev-parse --show-toplevel 2>/dev/null";
+    std::array<char, 4096> buffer{};
+    std::string git_root;
+
+    FILE* pipe = ::popen(git_root_cmd.c_str(), "r");
+    if (pipe == nullptr) {
+        return false;
+    }
+    if (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+        git_root = buffer.data();
+    }
+    ::pclose(pipe);
+
+    if (git_root.empty()) {
+        return false;
+    }
+    while (!git_root.empty() && (git_root.back() == '\n' || git_root.back() == '\r')) {
+        git_root.pop_back();
+    }
+    if (git_root.empty()) {
+        return false;
+    }
+
+    const fs::path root(git_root);
+    std::error_code ec;
+    const fs::path relative = fs::relative(fs::absolute(path, ec), root, ec);
+    if (ec) {
+        return false;
+    }
+
+    std::ostringstream cmd;
+    cmd << "git -C \"" << root.string() << "\" ls-files --error-unmatch -- \""
+        << relative.string() << "\" >/dev/null 2>&1";
+    return std::system(cmd.str().c_str()) == 0;
 }
 
 fs::path bilayer_nwhat_case_dir() {
@@ -96,6 +134,9 @@ std::size_t count_output_load_steps(const fs::path& output_path) {
 
 TEST(SimulatorAssembly, LoadStepOneEnergyMatchesArchivedCompressionOracle) {
     const fs::path case_dir = archived_case_dir();
+    if (!is_source_backed_runtime_artifact(case_dir / "energy.dat")) {
+        GTEST_SKIP() << "archived np1/energy.dat is not source-backed in this checkout";
+    }
 
     const auto input = fce::load_simulator_input(case_dir.string());
     const auto coords = fce::read_vtu_points(
@@ -114,6 +155,11 @@ TEST(SimulatorAssembly, LoadStepOneEnergyMatchesArchivedCompressionOracle) {
 
 TEST(SimulatorAssembly, ArchivedEnergyTrajectoryMatchesOracleFile) {
     const fs::path case_dir = archived_case_dir();
+    if (!is_source_backed_runtime_artifact(case_dir / "energy.dat") ||
+        !is_source_backed_runtime_artifact(case_dir / "output.dat")) {
+        GTEST_SKIP() << "archived np1 energy/output rows are not source-backed in this checkout";
+    }
+
     const auto input = fce::load_simulator_input(case_dir.string());
     const auto energies = read_archived_step_energies(case_dir / "energy.dat");
 

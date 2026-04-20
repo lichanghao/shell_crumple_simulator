@@ -500,7 +500,15 @@ NewtonInnerOutput solve_inner_newton_impl(const MatData& mat,
         out.eta = out.eta + dx;
         if (norm(out.eta) > 0.5 * mat.A0) {
             out.fail_mode = 2;
-            out.eta = eta_prev;
+            try {
+                current = evaluate(out.eta);
+            } catch (const std::invalid_argument& ex) {
+                if (std::string(ex.what()).find("singular bond angle derivative") == std::string::npos) {
+                    throw;
+                }
+                out.fail_mode = 1;
+                out.eta = eta_prev;
+            }
             break;
         }
 
