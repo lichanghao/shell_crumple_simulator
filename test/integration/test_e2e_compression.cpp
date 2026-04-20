@@ -10,14 +10,12 @@
 #include <array>
 #include <cctype>
 #include <cstdio>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <cstdlib>
 #include <vector>
 
 namespace {
@@ -229,42 +227,6 @@ fs::path make_temp_dir() {
 
 std::string shell_quote(const fs::path& path) {
     return "\"" + path.string() + "\"";
-}
-
-bool is_source_backed_runtime_artifact(const fs::path& path) {
-    std::array<char, 4096> buffer{};
-    std::string git_root;
-
-    FILE* pipe = ::popen("git rev-parse --show-toplevel 2>/dev/null", "r");
-    if (pipe == nullptr) {
-        return false;
-    }
-    if (std::fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
-        git_root = buffer.data();
-    }
-    ::pclose(pipe);
-
-    if (git_root.empty()) {
-        return false;
-    }
-    while (!git_root.empty() && (git_root.back() == '\n' || git_root.back() == '\r')) {
-        git_root.pop_back();
-    }
-    if (git_root.empty()) {
-        return false;
-    }
-
-    const fs::path root(git_root);
-    std::error_code ec;
-    const fs::path relative = fs::relative(fs::absolute(path, ec), root, ec);
-    if (ec) {
-        return false;
-    }
-
-    std::ostringstream cmd;
-    cmd << "git -C " << shell_quote(root) << " ls-files --error-unmatch -- "
-        << shell_quote(relative) << " >/dev/null 2>&1";
-    return std::system(cmd.str().c_str()) == 0;
 }
 
 void expect_xml_loadable(const std::vector<fs::path>& paths) {
@@ -1501,11 +1463,6 @@ TEST_F(E2ECompression, CrunchItStepOnePreservesArchivedBcNodeGeometry) {
 }
 
 TEST(CompressionCaseFiles, ArchivedStepOneVtuMatchesArchivedEnergyAndReactionRows) {
-    if (!is_source_backed_runtime_artifact(kCaseDir / "energy.dat") ||
-        !is_source_backed_runtime_artifact(kCaseDir / "force.dat")) {
-        GTEST_SKIP() << "archived np1 energy/force rows are not source-backed in this checkout";
-    }
-
     const auto input = fce::load_simulator_input(kCaseDir.string());
     auto state = replay_state_from_oracle_vtu(kCaseDir / "mesh_config_0001.vtu", input);
 

@@ -716,7 +716,9 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
         return {res.total_energy, extract_free_gradient(res, bcs)};
     };
 
-    int flag = solver.minimize(x_free, xnorm0, /*stop_on_first_trial=*/true, callback);
+    const bool stop_on_first_trial =
+        (bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31);
+    int flag = solver.minimize(x_free, xnorm0, stop_on_first_trial, callback);
 
     // Broadcast and scatter final state.
     double gnorm = solver.gnorm();

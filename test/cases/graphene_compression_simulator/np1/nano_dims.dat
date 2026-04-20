@@ -1,0 +1,22 @@
+ Dims data
+ ---------
+ mesh0%numele
+        3200
+ mesh0%numnods
+        1681
+ mesh0%nedge
+         166
+ mesh0%nelem_ghost
+           0
+ mesh0%nnode_ghost
+           0
+ ngauss
+           2
+ BCs%nnodBC
+          82
+ BCs%ndofBC
+         246
+ BCs%ndofOP
+        4797
+ vdw1%nvdw
+           0

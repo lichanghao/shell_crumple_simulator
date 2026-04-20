@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<VTKFile type="Collection" version="0.1" byte_order="LittleEndian">
+  <Collection>
+    <DataSet timestep="0.0000000000000000E+00" group="" part="0" file="mesh_config_0000.vtu"/>
+    <DataSet timestep="2.0000000000000000E-02" group="" part="0" file="mesh_config_0001.vtu"/>
+  </Collection>
+</VTKFile>

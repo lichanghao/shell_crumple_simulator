@@ -44,6 +44,8 @@ Eofnode*
 test/cases/*
 !test/cases/graphene_compression_simulator/
 test/cases/graphene_compression_simulator/*
+!test/cases/graphene_compression_simulator/np1/
+!test/cases/graphene_compression_simulator/np1/**
 !test/cases/graphene_compression_simulator/replay_step1_monitor.dat
 !test/cases/graphene_compression_simulator/replay_step1_eval_sequence.dat
 !test/cases/graphene_compression_simulator/replay_step1_energy.dat
@@ -51,6 +53,10 @@ test/cases/graphene_compression_simulator/*
 !test/cases/graphene_compression_simulator/replay_step1_stdout.txt
 !test/cases/graphene_cyclic_crumple/
 test/cases/graphene_cyclic_crumple/*
+!test/cases/graphene_cyclic_crumple/prepro_run/
+!test/cases/graphene_cyclic_crumple/prepro_run/**
+!test/cases/graphene_cyclic_crumple/simulator_run/
+!test/cases/graphene_cyclic_crumple/simulator_run/**
 !test/cases/graphene_cyclic_crumple/replay_step1_trace.dat
 !test/cases/graphene_cyclic_crumple/replay_step1_energy.dat
 !test/cases/graphene_cyclic_crumple/replay_step1_force.dat
