@@ -20,6 +20,12 @@
 ### Remaining blocker
 - `GT-AC1` is still open. The main cyclic executable-path replay lane is still red, and the new oracle dumper is not yet trustworthy enough to freeze as a committed regression fixture.
 
+## BitLesson Delta
+
+- No new BitLesson entry was added this round.
+- I re-read `.humanize/bitlesson.md` before the work.
+- `bitlesson-selector` was not available in the current shell environment, so there was no selector output to apply or record for this round.
+
 ## Goal Tracker Update Request
 
 ### Requested Changes:
