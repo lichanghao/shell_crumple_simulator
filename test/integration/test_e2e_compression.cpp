@@ -2473,6 +2473,7 @@ TEST_F(E2ECyclicRuntime, CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOrac
     EXPECT_LE(max_abs, 1e-6);
 }
 
+#if !defined(FCE_EXCLUDE_CHECKPOINT_REJECTION_TESTS)
 TEST_F(E2ECyclicRuntime, CrunchItRejectsCheckpointWrittenWithDifferentRankCount) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
 
@@ -2533,6 +2534,7 @@ TEST_F(E2ECyclicRuntime, CrunchItRejectsMalformedCheckpointAcrossRanks) {
     EXPECT_NE(output.find("failed to read checkpoint"), std::string::npos);
     EXPECT_NE(output.find("checkpoint nodal positions has too few columns"), std::string::npos);
 }
+#endif
 
 TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRun) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;

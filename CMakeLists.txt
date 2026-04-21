@@ -138,6 +138,21 @@ target_include_directories(integration_tests PRIVATE
 )
 gtest_discover_tests(integration_tests
   TEST_LIST integration_test_list
+  PROPERTIES TIMEOUT 180
+)
+
+add_executable(checkpoint_integration_tests
+  test/integration/test_checkpoint_rejection.cpp
+)
+target_link_libraries(checkpoint_integration_tests PRIVATE
+  fce_core
+  GTest::gtest_main
+)
+target_include_directories(checkpoint_integration_tests PRIVATE
+  ${CMAKE_SOURCE_DIR}/test/support
+)
+gtest_discover_tests(checkpoint_integration_tests
+  TEST_LIST checkpoint_integration_test_list
   PROPERTIES
     TIMEOUT 180
     RUN_SERIAL TRUE
@@ -147,6 +162,13 @@ gtest_discover_tests(integration_tests
 target_compile_definitions(integration_tests PRIVATE
   ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
   CRUNCH_IT_BIN="$<TARGET_FILE:crunch_it>"
+  FCE_EXCLUDE_CHECKPOINT_REJECTION_TESTS=1
+)
+target_compile_definitions(checkpoint_integration_tests PRIVATE
+  ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
+  CRUNCH_IT_BIN="$<TARGET_FILE:crunch_it>"
+  MPIEXEC_BIN="${MPIEXEC_EXECUTABLE}"
+  MPIEXEC_NUMPROC_FLAG_VALUE="${MPIEXEC_NUMPROC_FLAG}"
 )
 target_compile_definitions(unit_tests PRIVATE
   ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
