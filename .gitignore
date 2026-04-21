@@ -1,9 +1,10 @@
-# Prompt and history files
+# Prompt, agent, and local workflow files
 draft.md
 CLAUDE.md
 AGENT.md
 GEMINI.md
 .humanize*
+.sisyphus/
 
 # macOS Finder metadata
 .DS_Store
@@ -18,9 +19,9 @@ __pycache__/
 *.smod
 
 # Built executables
-crunch_it
-crunch_it_dbg
-PrePro
+/crunch_it
+/crunch_it_dbg
+/PrePro
 
 # Data and simulation outputs (ignored by extension)
 *.dat
@@ -32,8 +33,16 @@ PrePro
 *.case
 *.pvd
 Eofnode*
+*.vtk
+*.vtp
+*.pvtu
+*.csv
+*.tsv
+*.out
+*.tmp
+*.bak
 
-# EXCEPTIONS: Keep necessary input and documentation files
+# EXCEPTIONS: Keep necessary input fixtures
 !**/input/*.dat
 !**/prepro_input/*.dat
 !nanotubeTwistOriginPrepro/data.dat
@@ -61,11 +70,35 @@ test/cases/graphene_cyclic_crumple/*
 !test/cases/graphene_cyclic_crumple/replay_step1_energy.dat
 !test/cases/graphene_cyclic_crumple/replay_step1_force.dat
 !test/cases/graphene_cyclic_crumple/post_minimize_free_coords.dat
-document/*
-build/*
+
+# Documentation and notes
+document/
+docs/
+*.pdf
+*.doc
+*.docx
+*.ppt
+*.pptx
+
+# Build directories
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+Testing/
+
+# Archives and other bulky artifacts
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.gz
 
 # Editor backup/swap artifacts
 *~
 \#*\#
-*.bak
 .omx/
+*.swp
+*.swo
