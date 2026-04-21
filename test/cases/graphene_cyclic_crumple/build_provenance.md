@@ -29,6 +29,27 @@ That means:
 - its `energy.dat` / `force.dat` rows are useful as archived-runtime context only
 - they must **not** be used directly to regenerate the deterministic `replay_step1_*.dat` fixtures
 
+## Source-Backed Deterministic Replay Builder
+
+The repository now includes a replay-specific source build helper:
+
+- `test/cases/tools/build_cyclic_replay_runtime.sh`
+
+It works by copying the canonical Fortran simulator source tree into a scratch build
+directory, patching only the copied `pasapas.f90` so that cyclic imperfections can be
+read from `imperfection_trace.dat`, and then compiling a replay-only executable
+`crunch_it_replay`.
+
+Example command:
+
+```bash
+test/cases/tools/build_cyclic_replay_runtime.sh \
+  ../finite_crystal_elasticity/grapheneCompressionOriginVersion \
+  /tmp/fce_fortran_replay_runtime
+```
+
+The script prints the built replay executable path at the end.
+
 ## Deterministic Replay Fixtures
 
 The committed deterministic fixtures in this directory are:
@@ -46,12 +67,31 @@ The committed deterministic fixtures in this directory are:
 These fixtures were captured from a source-backed **instrumented Fortran replay path**
 that reproduces the deterministic replay lane used by the C++ tests.
 
+That path is now reproducible in-tree through the replay builder above. A fresh replay run
+can be produced by:
+
+```bash
+tmp=$(mktemp -d /tmp/fortran_replaycap.XXXXXX)
+cp -R test/cases/graphene_cyclic_crumple/prepro_run "$tmp/case"
+rm -f "$tmp/case"/energy.dat "$tmp/case"/force.dat "$tmp/case"/output.dat \
+      "$tmp/case"/nano_final_config.dat "$tmp/case"/nano_checkpoint.dat \
+      "$tmp/case"/mesh_config_*.vtu "$tmp/case"/mesh_config_series.pvd
+cp test/cases/graphene_cyclic_crumple/replay_step1_trace.dat "$tmp/case/imperfection_trace.dat"
+( cd "$tmp/case" && /tmp/fce_fortran_replay_runtime/crunch_it_replay 1 > "$tmp/stdout.txt" 2>&1 )
+```
+
 In particular, `replay_step1_energy.dat` and `replay_step1_force.dat` remain:
 
 ```text
        1     1   1  0.30445359E-03  0.30445359E-03  0.00000000E+00  0.00000000E+00  0.977273355D-05
        1     1   1      0.000022279      0.001250697
 ```
+
+A fresh run through `crunch_it_replay` reproduced those same rows in Round 1 of the
+`2026-04-21_15-18-42` RLCR session:
+
+- stdout `Equilibrium energy`: `3.0445358806477097E-004`
+- `force.dat`: `0.000022279  0.001250697`
 
 These rows are the deterministic replay contract currently exercised by
 `E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically`.
