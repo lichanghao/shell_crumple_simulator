@@ -1,5 +1,4 @@
 # Round 0 Summary
-## Round 0 Summary
 
 ### What was implemented
 
@@ -29,24 +28,3 @@
 Action: none
 Lesson ID(s): NONE
 Notes: Re-read `.humanize/bitlesson.md` before the work. `bitlesson-selector` was not available in the current shell environment, so there was no selector output or new BitLesson entry for this round.
-## What Was Implemented
-
-[Describe what was done]
-
-## Files Changed
-
-[List files created/modified/deleted]
-
-## Validation
-
-[List tests/commands run and outcomes]
-
-## Remaining Items
-
-[List any deferred or pending items]
-
-## BitLesson Delta
-
-Action: none
-Lesson ID(s): NONE
-Notes: [what changed and why]
