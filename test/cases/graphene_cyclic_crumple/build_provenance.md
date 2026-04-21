@@ -62,15 +62,24 @@ that source-built runtime produced a step-one `force.dat` row beginning with:
 ```
 
 That row is much closer to the archived `simulator_run/force.dat` step-one value
-(`-0.000063531`, `0.001053300`) than to the committed replay-only fixture
-`replay_step1_force.dat` (`0.000022279`, `0.001250697`).
+(`-0.000063531`, `0.001053300`) than to the older replay-only fixture that had been
+checked in previously.
+
+The committed replay-only force-row fixture was therefore refreshed from that
+source-built canonical Fortran runtime result:
+
+```text
+       1     1   1     -0.000064340      0.001056593
+```
 
 Interpretation:
 
 - the source-built Fortran runtime confirms that the accepted-state-2 element oracle now uses the
   correct archived runtime contract (`nW_hat=0`)
-- the replay-only force-row fixture should be treated as suspect until its capture path is
-  reconstructed and documented from source
+- the replay-only force-row fixture now has a source-backed capture path through the
+  source-built canonical runtime above
+- the replay-only energy-row fixture is still not equally source-backed, because the same
+  source-built replay run did not emit a stable step-one `energy.dat` row before termination
 - the live cyclic blocker is therefore split between:
   - the executable-path C++ vs source-built-Fortran runtime mismatch
-  - the stale provenance of `replay_step1_force.dat`
+  - the still-unresolved source-backed capture path for `replay_step1_energy.dat`
