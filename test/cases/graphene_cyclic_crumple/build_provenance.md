@@ -65,11 +65,11 @@ That row is much closer to the archived `simulator_run/force.dat` step-one value
 (`-0.000063531`, `0.001053300`) than to the older replay-only fixture that had been
 checked in previously.
 
-The committed replay-only force-row fixture was therefore refreshed from that
-source-built canonical Fortran runtime result:
+The committed replay-only force-row fixture was therefore refreshed from the
+final step-one `force.dat` row written by that source-built canonical Fortran runtime:
 
 ```text
-       1     1   1     -0.000064340      0.001056593
+       1     1   1     -0.000000985      0.001052467
 ```
 
 Interpretation:
@@ -78,8 +78,24 @@ Interpretation:
   correct archived runtime contract (`nW_hat=0`)
 - the replay-only force-row fixture now has a source-backed capture path through the
   source-built canonical runtime above
-- the replay-only energy-row fixture is still not equally source-backed, because the same
-  source-built replay run did not emit a stable step-one `energy.dat` row before termination
+- the replay-only energy-row fixture can also now be refreshed from that same source-built run,
+  but its capture path is different: the source-built runtime did not append a stable step-one
+  row to `energy.dat` before proceeding, so the source-backed energy contract comes from the
+  step-one `Equilibrium energy:` line and the last printed convergence value immediately before
+  the step-2 banner:
+
+```text
+Equilibrium energy: 2.7438748296784488E-004
+last printed CRITC: 9.646D-06
+```
+
+- the committed replay-only energy-row fixture was refreshed from that source-backed stdout capture:
+
+```text
+       1     1   1  0.27438748E-03  0.27438748E-03  0.00000000E+00  0.00000000E+00  0.964600000D-05
+```
 - the live cyclic blocker is therefore split between:
   - the executable-path C++ vs source-built-Fortran runtime mismatch
-  - the still-unresolved source-backed capture path for `replay_step1_energy.dat`
+  - the fact that the source-backed replay energy row is currently reconstructed from stdout rather
+    than from an appended `energy.dat` row, so that capture path should still be treated as more
+    fragile than the force-row path
