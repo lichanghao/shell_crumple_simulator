@@ -36,3 +36,41 @@ gfortran -o dump_cyclic_replay_element_oracle headers.o BSpline.o Taylor.o gauss
   - if `nW_hat=0`, it keeps `eta` fixed and does not call `newton_inner`
   - if `nW_hat=1`, it performs the same guarded inner-relaxation path described above
 - The committed artifact `replay_step1_accepted_2_element3200_full_oracle.dat` was regenerated after this fix and now represents the archived cyclic accepted-state-2 runtime contract instead of an unconditional inner-relaxation helper path.
+
+## Source-Built Fortran Replay Check
+
+Round 2 of the restarted RLCR session also rebuilt the canonical Fortran simulator from
+`../finite_crystal_elasticity/grapheneCompressionOriginVersion/` with the local GCC MPI toolchain
+using `-fallow-argument-mismatch` for legacy MPI calls:
+
+```bash
+rm -rf /tmp/fce_fortran_runtime
+mkdir -p /tmp/fce_fortran_runtime
+cp ../finite_crystal_elasticity/grapheneCompressionOriginVersion/* /tmp/fce_fortran_runtime/
+cd /tmp/fce_fortran_runtime
+mpif77 -w -O3 -fallow-argument-mismatch -c headers.f90
+mpif77 -w -O3 -fallow-argument-mismatch -c *.f90
+mpif77 -w -O3 -fallow-argument-mismatch -c *.f
+mpif77 -O3 -fallow-argument-mismatch -o crunch_it_built *.o
+```
+
+Using the committed cyclic replay case plus `replay_step1_trace.dat` as `imperfection_trace.dat`,
+that source-built runtime produced a step-one `force.dat` row beginning with:
+
+```text
+       1     1   1     -0.000064340      0.001056593
+```
+
+That row is much closer to the archived `simulator_run/force.dat` step-one value
+(`-0.000063531`, `0.001053300`) than to the committed replay-only fixture
+`replay_step1_force.dat` (`0.000022279`, `0.001250697`).
+
+Interpretation:
+
+- the source-built Fortran runtime confirms that the accepted-state-2 element oracle now uses the
+  correct archived runtime contract (`nW_hat=0`)
+- the replay-only force-row fixture should be treated as suspect until its capture path is
+  reconstructed and documented from source
+- the live cyclic blocker is therefore split between:
+  - the executable-path C++ vs source-built-Fortran runtime mismatch
+  - the stale provenance of `replay_step1_force.dat`
