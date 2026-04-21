@@ -105,6 +105,6 @@ Recent progress on that surface is narrower but real:
 
 ## Recommended next steps
 
-1. Resume the archived compression executable-path mismatch investigation in `src/core/solver.cpp`, `src/core/load_controller.cpp`, `src/core/simulator.cpp`, and related runtime tests.
+1. Fix the cyclic constrained-step replay lane in `src/core/solver.cpp`, `src/core/load_controller.cpp`, `src/core/simulator.cpp`, and the committed replay tests, using the accepted-state-2 `g_free` / force divergence boundary as the starting point.
 2. Translate simulator-side vdW/self-contact logic from `vdw_modules.f90` and connect it to a real executable-path `nvdw=1` oracle case.
-3. Finish cyclic controller, crease memory, checkpoint/restart, and MPI acceptance coverage after the runtime mainline is stable.
+3. Finish cyclic restart parity, crease-memory/analysis acceptance, and `np=1/2/4` MPI coverage after the cyclic replay lane and runtime vdW path are stable.

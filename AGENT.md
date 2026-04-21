@@ -93,7 +93,7 @@ Frequently used focused commands:
 - Preprocessor-side mesh, ghost-node, B-spline, reference-config, and `nvdw=1` preprocessing coverage are translated and oracle-backed.
 - Core constitutive pieces, principal/exponential helpers, archived element-state fixtures, and the assembly path are translated.
 - Runtime VTU/PVD writing now includes parser-backed XML validation in tests.
-- The main unresolved runtime gap is still AC-7: the executable-path compression run diverges from the archived Fortran trajectory.
+- The main unresolved runtime gap is now the cyclic step-one replay lane: the accepted-state-2 free-gradient / force path diverges during the constrained solve, even though the archived compression executable path is green.
 - Runtime vdW/self-contact assembly is still not translated end to end.
 - Cyclic controller, crease memory, checkpoint/restart, and MPI parity verification are still incomplete.
   Shared checkpoint rejection/loading is verified, short-case nonzero `K0_ref` restart parity is covered, and archived `crease_map.dat` parity is covered, but the main cyclic step-one replay lane and multi-rank acceptance are still open.
