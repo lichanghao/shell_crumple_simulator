@@ -197,6 +197,50 @@ RuntimeState make_runtime_state(const SimulatorInput& input) {
     };
 }
 
+CheckpointResumeResult load_runtime_checkpoint(const SimulatorInput& input,
+                                               const std::string& case_dir,
+                                               const int current_nprocs,
+                                               const RuntimeState& initial_state) {
+    CheckpointResumeResult result;
+    result.state = initial_state;
+
+    if (input.bcs.nCodeLoad != 30 && input.bcs.nCodeLoad != 31) {
+        return result;
+    }
+
+    const std::filesystem::path checkpoint_path =
+        std::filesystem::path(case_dir) / "nano_checkpoint.dat";
+    if (!std::filesystem::exists(checkpoint_path)) {
+        return result;
+    }
+
+    try {
+        const auto checkpoint = io::read_checkpoint(checkpoint_path.string(),
+                                                   input.mesh.numnods,
+                                                   input.mesh.numele,
+                                                   input.dims.ngauss,
+                                                   input.crease.ncrease == 1);
+        result.checkpoint_nprocs = checkpoint.nprocs;
+        if (checkpoint.nprocs > 0 && checkpoint.nprocs != current_nprocs) {
+            result.status = CheckpointResumeStatus::rank_count_mismatch;
+            return result;
+        }
+
+        result.state.coords = checkpoint.config.coords;
+        result.state.eta = checkpoint.config.eta;
+        if (!checkpoint.K0_ref.empty()) {
+            result.state.K0_ref = checkpoint.K0_ref;
+        }
+        result.iload_start = checkpoint.iload + 1;
+        result.status = CheckpointResumeStatus::loaded;
+    } catch (const std::exception& ex) {
+        result.status = CheckpointResumeStatus::read_failed;
+        result.error_detail = ex.what();
+    }
+
+    return result;
+}
+
 Coords read_vtu_points(const std::string& path, const int expected_points) {
     std::ifstream in(path);
     if (!in) {

@@ -153,9 +153,7 @@ target_include_directories(checkpoint_integration_tests PRIVATE
 )
 gtest_discover_tests(checkpoint_integration_tests
   TEST_LIST checkpoint_integration_test_list
-  PROPERTIES
-    TIMEOUT 180
-    RUN_SERIAL TRUE
+  PROPERTIES TIMEOUT 180
 )
 
 # Pass oracle path to tests
@@ -166,9 +164,6 @@ target_compile_definitions(integration_tests PRIVATE
 )
 target_compile_definitions(checkpoint_integration_tests PRIVATE
   ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"
-  CRUNCH_IT_BIN="$<TARGET_FILE:crunch_it>"
-  MPIEXEC_BIN="${MPIEXEC_EXECUTABLE}"
-  MPIEXEC_NUMPROC_FLAG_VALUE="${MPIEXEC_NUMPROC_FLAG}"
 )
 target_compile_definitions(unit_tests PRIVATE
   ORACLE_DIR="${CMAKE_SOURCE_DIR}/test/cases"

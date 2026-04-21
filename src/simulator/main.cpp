@@ -82,35 +82,27 @@ int main(int argc, char** argv) {
             auto state = fce::make_runtime_state(input);
             int iload_start = 1;
             if (input.bcs.nCodeLoad == 30 || input.bcs.nCodeLoad == 31) {
-                const std::filesystem::path checkpoint_path =
-                    std::filesystem::path(case_dir) / "nano_checkpoint.dat";
                 int checkpoint_found = 0;
                 int checkpoint_status = 0;
                 int checkpoint_nprocs = 0;
-                if (mpi.is_root() && std::filesystem::exists(checkpoint_path)) {
-                    try {
-                        const auto checkpoint = fce::io::read_checkpoint(checkpoint_path.string(),
-                                                                         input.mesh.numnods,
-                                                                         input.mesh.numele,
-                                                                         input.dims.ngauss,
-                                                                         input.crease.ncrease == 1);
-                        checkpoint_nprocs = checkpoint.nprocs;
-                        if (checkpoint.nprocs > 0 && checkpoint.nprocs != mpi.size()) {
-                            checkpoint_status = -1;
-                        } else {
-                            state.coords = checkpoint.config.coords;
-                            state.eta = checkpoint.config.eta;
-                            if (!checkpoint.K0_ref.empty()) {
-                                state.K0_ref = checkpoint.K0_ref;
-                            }
-                            iload_start = checkpoint.iload + 1;
-                            checkpoint_found = 1;
-                        }
-                    } catch (const std::exception& ex) {
-                        if (mpi.is_root()) {
-                            std::cerr << "failed to read checkpoint: " << ex.what() << "\n";
-                        }
+                if (mpi.is_root()) {
+                    const auto resume = fce::load_runtime_checkpoint(input, case_dir, mpi.size(), state);
+                    checkpoint_nprocs = resume.checkpoint_nprocs;
+                    switch (resume.status) {
+                    case fce::CheckpointResumeStatus::not_found:
+                        break;
+                    case fce::CheckpointResumeStatus::loaded:
+                        state = resume.state;
+                        iload_start = resume.iload_start;
+                        checkpoint_found = 1;
+                        break;
+                    case fce::CheckpointResumeStatus::rank_count_mismatch:
+                        checkpoint_status = -1;
+                        break;
+                    case fce::CheckpointResumeStatus::read_failed:
+                        std::cerr << "failed to read checkpoint: " << resume.error_detail << "\n";
                         checkpoint_status = -2;
+                        break;
                     }
                 }
 

@@ -29,6 +29,21 @@ struct RuntimeState {
     std::vector<std::vector<std::array<double, 3>>> K0_ref{};
 };
 
+enum class CheckpointResumeStatus {
+    not_found,
+    loaded,
+    rank_count_mismatch,
+    read_failed,
+};
+
+struct CheckpointResumeResult {
+    CheckpointResumeStatus status{CheckpointResumeStatus::not_found};
+    RuntimeState state{};
+    int iload_start{1};
+    int checkpoint_nprocs{0};
+    std::string error_detail{};
+};
+
 struct AssemblyResult {
     double total_energy{0.0};
     double reduced_energy{0.0};
@@ -39,6 +54,10 @@ struct AssemblyResult {
 
 SimulatorInput load_simulator_input(const std::string& case_dir);
 RuntimeState make_runtime_state(const SimulatorInput& input);
+CheckpointResumeResult load_runtime_checkpoint(const SimulatorInput& input,
+                                              const std::string& case_dir,
+                                              int current_nprocs,
+                                              const RuntimeState& initial_state);
 
 Coords read_vtu_points(const std::string& path, int expected_points);
 
