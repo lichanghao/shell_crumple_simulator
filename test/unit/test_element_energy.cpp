@@ -95,6 +95,24 @@ struct ArchivedElementFixture {
     double W{0.0};          // inner W at converged eta
 };
 
+struct CyclicReplayElementFixture {
+    int element_index{0};
+    int ngauss{0};
+    std::vector<Voigt3> C_elem;
+    std::vector<Voigt3> curv0_elem;
+    std::vector<Vec2> curvppal;
+    std::vector<Mat22> vppal;
+    std::vector<bool> flag_num_diff;
+    std::vector<Vec2> eta_in;
+    std::vector<int> iterations;
+    std::vector<int> fail_mode;
+    std::vector<Vec2> eta_final;
+    std::vector<double> W;
+    std::vector<std::array<double, 6>> pe;
+    double W_elem{0.0};
+    std::array<Vec3, 12> f_elem{};
+};
+
 ArchivedElementFixture read_archived_fixture(const fs::path& path) {
     const auto rows = read_rows(path);
     if (rows.size() != 20U) {
@@ -113,6 +131,61 @@ ArchivedElementFixture read_archived_fixture(const fs::path& path) {
     f.fail_mode     = static_cast<int>(rows[14].at(1));
     f.eta           = row_to_vec2(rows[15]);
     f.W             = rows[16].at(0);
+    return f;
+}
+
+CyclicReplayElementFixture read_cyclic_replay_element_fixture(const fs::path& path) {
+    const auto rows = read_rows(path);
+    if (rows.size() != 40U) {
+        throw std::runtime_error("unexpected cyclic replay element fixture row count: " + path.string());
+    }
+
+    CyclicReplayElementFixture f;
+    f.element_index = static_cast<int>(rows[0].at(0)) - 1;
+    f.ngauss = static_cast<int>(rows[0].at(1));
+    std::size_t row = 1;
+    f.C_elem.resize(static_cast<std::size_t>(f.ngauss));
+    f.curv0_elem.resize(static_cast<std::size_t>(f.ngauss));
+    f.curvppal.resize(static_cast<std::size_t>(f.ngauss));
+    f.vppal.resize(static_cast<std::size_t>(f.ngauss));
+    f.flag_num_diff.resize(static_cast<std::size_t>(f.ngauss));
+    f.eta_in.resize(static_cast<std::size_t>(f.ngauss));
+    f.iterations.resize(static_cast<std::size_t>(f.ngauss));
+    f.fail_mode.resize(static_cast<std::size_t>(f.ngauss));
+    f.eta_final.resize(static_cast<std::size_t>(f.ngauss));
+    f.W.resize(static_cast<std::size_t>(f.ngauss));
+    f.pe.resize(static_cast<std::size_t>(f.ngauss));
+
+    for (int igauss = 0; igauss < f.ngauss; ++igauss) {
+        f.C_elem[static_cast<std::size_t>(igauss)] = row_to_voigt3(rows.at(row++));
+        f.curv0_elem[static_cast<std::size_t>(igauss)] = row_to_voigt3(rows.at(row++));
+        f.curvppal[static_cast<std::size_t>(igauss)] = row_to_vec2(rows.at(row++));
+        f.vppal[static_cast<std::size_t>(igauss)] = Mat22{
+            Vec2{rows.at(row).at(0), rows.at(row).at(1)},
+            Vec2{rows.at(row + 1).at(0), rows.at(row + 1).at(1)},
+        };
+        row += 2;
+        f.flag_num_diff[static_cast<std::size_t>(igauss)] = (static_cast<int>(rows.at(row++).at(0)) != 0);
+        f.eta_in[static_cast<std::size_t>(igauss)] = row_to_vec2(rows.at(row++));
+        f.iterations[static_cast<std::size_t>(igauss)] = static_cast<int>(rows.at(row).at(0));
+        f.fail_mode[static_cast<std::size_t>(igauss)] = static_cast<int>(rows.at(row).at(1));
+        ++row;
+        f.eta_final[static_cast<std::size_t>(igauss)] = row_to_vec2(rows.at(row++));
+        f.W[static_cast<std::size_t>(igauss)] = rows.at(row++).at(0);
+        std::copy(rows.at(row).begin(), rows.at(row).end(),
+                  f.pe[static_cast<std::size_t>(igauss)].begin());
+        ++row;
+        row += 2;
+    }
+    f.W_elem = rows.at(row++).at(0);
+    for (int inode = 0; inode < 12; ++inode) {
+        f.f_elem[static_cast<std::size_t>(inode)] = Vec3{
+            rows.at(row).at(0),
+            rows.at(row).at(1),
+            rows.at(row).at(2),
+        };
+        ++row;
+    }
     return f;
 }
 
@@ -174,6 +247,79 @@ NeighborCoords12 neighbor_patch_from_archive(const ArchivedCompressionState& arc
             archive.coords_with_ghosts.at(base + 1),
             archive.coords_with_ghosts.at(base + 2),
         };
+    }
+    return xneigh;
+}
+
+std::vector<Vec3> read_fortran_coord_dump(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open coord dump: " + path.string());
+    }
+    std::vector<Vec3> coords;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        int inode = 0;
+        std::string x, y, z;
+        if (!(row >> inode >> x >> y >> z)) {
+            continue;
+        }
+        coords.push_back(Vec3{
+            fce::io::parse_fortran_double(x),
+            fce::io::parse_fortran_double(y),
+            fce::io::parse_fortran_double(z),
+        });
+    }
+    return coords;
+}
+
+fce::EtaField read_fortran_eta_dump(const fs::path& path, int numele, int ngauss) {
+    fce::EtaField eta(
+        static_cast<std::size_t>(numele),
+        std::vector<fce::Vec2>(static_cast<std::size_t>(ngauss), fce::Vec2{0.0, 0.0}));
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open eta dump: " + path.string());
+    }
+    std::size_t index = 0;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        int ielem = 0, igauss = 0;
+        std::string s1, s2;
+        if (!(row >> ielem >> igauss >> s1 >> s2)) {
+            continue;
+        }
+        eta.at(index / static_cast<std::size_t>(ngauss))
+            .at(index % static_cast<std::size_t>(ngauss)) = Vec2{
+                fce::io::parse_fortran_double(s1),
+                fce::io::parse_fortran_double(s2),
+            };
+        ++index;
+    }
+    return eta;
+}
+
+NeighborCoords12 neighbor_patch_from_state(const fce::Mesh& mesh,
+                                           const fce::Coords& coords,
+                                           const int element_index) {
+    fce::FlatCoords flat;
+    flat.reserve(coords.size() * 3);
+    for (const auto& xyz : coords) {
+        flat.push_back(xyz[0]);
+        flat.push_back(xyz[1]);
+        flat.push_back(xyz[2]);
+    }
+    flat.resize(static_cast<std::size_t>(3 * (mesh.numnods + mesh.nedge)));
+    fce::ghost_nodes(mesh, flat);
+
+    NeighborCoords12 xneigh{};
+    const auto& element = mesh.connect.at(static_cast<std::size_t>(element_index));
+    for (int inode = 0; inode < 12; ++inode) {
+        const int node_index = element.neigh_vert[inode];
+        const std::size_t base = static_cast<std::size_t>(3 * node_index);
+        xneigh[inode] = Vec3{flat.at(base), flat.at(base + 1), flat.at(base + 2)};
     }
     return xneigh;
 }
@@ -711,6 +857,65 @@ TEST(ElementEnergy, BrennerMaterialMatchesFortranOracle) {
             const double expected = row.at(static_cast<std::size_t>(k));
             EXPECT_NEAR(result.f_elem[inode][k], expected, std::max(tol, std::abs(expected) * 1e-6))
                 << "f_elem[" << inode << "][" << k << "] vs Fortran Brenner oracle";
+        }
+    }
+}
+
+TEST(ElementEnergy, CyclicReplayAcceptedStateTwoElement3200MatchesFortranOracle) {
+    const fs::path case_dir =
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "prepro_run";
+    const auto dims = fce::io::read_dims((case_dir / "nano_dims.dat").string());
+    const auto general = fce::io::read_general((case_dir / "nano_general.dat").string());
+    const auto mesh = fce::io::read_mesh((case_dir / "nano_Mesh.dat").string(), dims.ngauss);
+    const auto ref_config = fce::io::read_zero((case_dir / "nano_zero.dat").string(), dims.numele);
+    const auto gauss = fce::setup_gauss(dims.ngauss);
+
+    const auto coords = read_fortran_coord_dump(
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "replay_step1_accepted_2.dat");
+    const auto eta = read_fortran_eta_dump(
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "replay_step1_accepted_2_eta.dat",
+        dims.numele,
+        dims.ngauss);
+    const auto oracle = read_cyclic_replay_element_fixture(
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "replay_step1_accepted_2_element3200_full_oracle.dat");
+
+    ASSERT_FALSE(general.nW_hat);
+    ASSERT_EQ(oracle.element_index, 3199);
+    ASSERT_EQ(oracle.ngauss, dims.ngauss);
+
+    const auto xneigh = neighbor_patch_from_state(mesh, coords, oracle.element_index);
+    const auto result = fce::compute_element_energy(
+        xneigh,
+        ref_config.at(static_cast<std::size_t>(oracle.element_index)).F0,
+        std::vector<Voigt3>(static_cast<std::size_t>(dims.ngauss), Voigt3{0.0, 0.0, 0.0}),
+        gauss,
+        general.mat,
+        general.nW_hat,
+        general.crit_local,
+        100,
+        eta.at(static_cast<std::size_t>(oracle.element_index)));
+
+    EXPECT_EQ(result.inner_fail, 0);
+    EXPECT_NEAR(result.W_elem, oracle.W_elem, 1e-8);
+    for (int igauss = 0; igauss < dims.ngauss; ++igauss) {
+        EXPECT_FALSE(oracle.flag_num_diff.at(static_cast<std::size_t>(igauss)));
+        EXPECT_EQ(oracle.iterations.at(static_cast<std::size_t>(igauss)), 0);
+        EXPECT_EQ(oracle.fail_mode.at(static_cast<std::size_t>(igauss)), 0);
+        for (int axis = 0; axis < 2; ++axis) {
+            EXPECT_NEAR(result.eta.at(static_cast<std::size_t>(igauss))[axis],
+                        oracle.eta_final.at(static_cast<std::size_t>(igauss))[axis],
+                        1e-12);
+            EXPECT_NEAR(oracle.eta_in.at(static_cast<std::size_t>(igauss))[axis],
+                        oracle.eta_final.at(static_cast<std::size_t>(igauss))[axis],
+                        1e-12);
+        }
+    }
+    for (int inode = 0; inode < 12; ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            EXPECT_NEAR(result.f_elem[inode][axis],
+                        oracle.f_elem.at(static_cast<std::size_t>(inode))[axis],
+                        1e-8)
+                << "inode=" << inode << " axis=" << axis;
         }
     }
 }

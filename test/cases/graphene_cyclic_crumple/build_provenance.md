@@ -31,5 +31,8 @@ gfortran -o dump_cyclic_replay_element_oracle headers.o BSpline.o Taylor.o gauss
 
 - The extractor now fails hard on two conditions that previously produced untrustworthy output:
   - coordinate-row index mismatch in the accepted-state coordinate dump
-  - nonzero `newton_inner` `fail_mode`
-- In Round 3, the accepted-state-2 / element-3200 extraction path still did **not** produce a trustworthy committed oracle artifact. The hardened extractor remains a debugging tool until it can complete without hitting those guards on the intended replay surface.
+  - nonzero `newton_inner` `fail_mode` when inner relaxation is actually enabled
+- The extractor also now honors the archived runtime contract from `nano_general.dat`:
+  - if `nW_hat=0`, it keeps `eta` fixed and does not call `newton_inner`
+  - if `nW_hat=1`, it performs the same guarded inner-relaxation path described above
+- The committed artifact `replay_step1_accepted_2_element3200_full_oracle.dat` was regenerated after this fix and now represents the archived cyclic accepted-state-2 runtime contract instead of an unconditional inner-relaxation helper path.

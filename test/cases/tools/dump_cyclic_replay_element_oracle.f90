@@ -97,6 +97,7 @@ program dump_cyclic_replay_element_oracle
   integer :: numele, numnods, nedge, ngauss
   integer :: ielem, igauss, ibond, inode, ij
   integer :: maxn, niter, fail_mode
+  logical :: use_inner_relax
 
   type(material) :: mat1
   type(mesh) :: mesh0
@@ -139,7 +140,7 @@ program dump_cyclic_replay_element_oracle
   allocate(weight(ngauss))
   allocate(mesh0%nghost_tab(nedge, 3))
 
-  call read_general_material(trim(case_dir) // "/nano_general.dat", mat1)
+  call read_general_material(trim(case_dir) // "/nano_general.dat", mat1, use_inner_relax)
   call read_zero(trim(case_dir) // "/nano_zero.dat", numele, F0)
   call read_coord_dump(trim(coords_path), numnods, x0)
   call read_eta_dump(trim(eta_path), numele, ngauss, eta)
@@ -171,12 +172,16 @@ program dump_cyclic_replay_element_oracle
 
     eta_in = eta(:, (ielem - 1)*ngauss + igauss)
     eta_final = eta_in
-    maxn = 100
-    call newton_inner(C_elem, curvppal, vppal, mat1, eta_final, W, dW, crit, niter, maxn, fail_mode)
-    if (fail_mode .ne. 0) then
-      write(*, '(A,I0,A,I0,A,I0)') "newton_inner failed for element ", ielem, &
-        " gauss ", igauss, " fail_mode ", fail_mode
-      stop 2
+    niter = 0
+    fail_mode = 0
+    if (use_inner_relax) then
+      maxn = 100
+      call newton_inner(C_elem, curvppal, vppal, mat1, eta_final, W, dW, crit, niter, maxn, fail_mode)
+      if (fail_mode .ne. 0) then
+        write(*, '(A,I0,A,I0,A,I0)') "newton_inner failed for element ", ielem, &
+          " gauss ", igauss, " fail_mode ", fail_mode
+        stop 2
+      end if
     end if
 
     do ibond = 1, 3
@@ -256,10 +261,12 @@ contains
     close(10)
   end subroutine read_dims
 
-  subroutine read_general_material(path, mat1)
+  subroutine read_general_material(path, mat1, use_inner_relax)
     character(len=*), intent(in) :: path
     type(material), intent(out) :: mat1
+    logical, intent(out) :: use_inner_relax
     integer :: i
+    integer :: nW_hat
     open(unit=11, file=path, status="old", action="read")
     call skip_to_label(11, "mat1%A0")
     read(11, *) mat1%A0
@@ -279,6 +286,9 @@ contains
     end do
     call skip_to_label(11, "mat1%s0")
     read(11, *) mat1%s0
+    call skip_to_label(11, "nW_hat")
+    read(11, *) nW_hat
+    use_inner_relax = (nW_hat .ne. 0)
     close(11)
   end subroutine read_general_material
 
