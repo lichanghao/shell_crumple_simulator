@@ -117,6 +117,15 @@ struct DataRow {
     std::vector<double> values;
 };
 
+struct CreaseRow {
+    int ielem{0};
+    double kappa_mean{0.0};
+    double kappa_max{0.0};
+    int is_creased{0};
+    int n_neigh{0};
+    double min_dihedral_deg{0.0};
+};
+
 struct PvdDataset {
     double timestep{0.0};
     std::string file;
@@ -230,6 +239,29 @@ std::vector<DataRow> read_positive_load_rows(const fs::path& path, const bool sk
         }
     }
     return filtered;
+}
+
+std::vector<CreaseRow> read_crease_rows(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open crease_map file: " + path.string());
+    }
+
+    std::vector<CreaseRow> rows;
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.empty() || line[0] == '!') {
+            continue;
+        }
+        std::istringstream row(line);
+        CreaseRow parsed;
+        if (!(row >> parsed.ielem >> parsed.kappa_mean >> parsed.kappa_max >>
+              parsed.is_creased >> parsed.n_neigh >> parsed.min_dihedral_deg)) {
+            continue;
+        }
+        rows.push_back(parsed);
+    }
+    return rows;
 }
 
 fce::FlatCoords flatten_coords_for_test(const fce::Coords& coords) {
@@ -2593,6 +2625,51 @@ TEST_F(E2ECyclicRuntime, ShortCyclicCheckpointCapturesNonzeroCreaseState) {
         }
     }
     EXPECT_GT(max_abs, 1.0e-6);
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    const auto resume = fce::load_runtime_checkpoint(input,
+                                                     temp_case_dir_.string(),
+                                                     /*current_nprocs=*/1,
+                                                     fce::make_runtime_state(input));
+    ASSERT_EQ(resume.status, fce::CheckpointResumeStatus::loaded);
+    ASSERT_EQ(resume.iload_start, checkpoint.iload + 1);
+    ASSERT_EQ(resume.state.coords.size(), checkpoint.config.coords.size());
+    ASSERT_EQ(resume.state.eta.size(), checkpoint.config.eta.size());
+    ASSERT_EQ(resume.state.K0_ref.size(), checkpoint.K0_ref.size());
+
+    double max_coord_abs = 0.0;
+    for (std::size_t inode = 0; inode < checkpoint.config.coords.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            max_coord_abs = std::max(max_coord_abs,
+                                     std::abs(resume.state.coords[inode][axis] -
+                                              checkpoint.config.coords[inode][axis]));
+        }
+    }
+    EXPECT_LE(max_coord_abs, 1e-12);
+
+    double max_eta_abs = 0.0;
+    for (std::size_t ielem = 0; ielem < checkpoint.config.eta.size(); ++ielem) {
+        for (std::size_t igauss = 0; igauss < checkpoint.config.eta[ielem].size(); ++igauss) {
+            for (int axis = 0; axis < 2; ++axis) {
+                max_eta_abs = std::max(max_eta_abs,
+                                       std::abs(resume.state.eta[ielem][igauss][axis] -
+                                                checkpoint.config.eta[ielem][igauss][axis]));
+            }
+        }
+    }
+    EXPECT_LE(max_eta_abs, 1e-12);
+
+    double max_k0_abs = 0.0;
+    for (std::size_t ielem = 0; ielem < checkpoint.K0_ref.size(); ++ielem) {
+        for (std::size_t igauss = 0; igauss < checkpoint.K0_ref[ielem].size(); ++igauss) {
+            for (int axis = 0; axis < 3; ++axis) {
+                max_k0_abs = std::max(max_k0_abs,
+                                      std::abs(resume.state.K0_ref[ielem][igauss][axis] -
+                                               checkpoint.K0_ref[ielem][igauss][axis]));
+            }
+        }
+    }
+    EXPECT_LE(max_k0_abs, 1e-12);
 }
 
 TEST_F(E2ECyclicRuntime, ShortCyclicRestartPreservesCreaseMapAndCheckpointState) {
@@ -2652,6 +2729,44 @@ TEST_F(E2ECyclicRuntime, CrunchItWritesCreaseMapForShortCyclicRun) {
     const std::string content = read_file(crease_map);
     EXPECT_NE(content.find("crease_map.dat"), std::string::npos);
     EXPECT_NE(content.find("Creased elements"), std::string::npos);
+}
+
+TEST_F(E2ECyclicRuntime, RuntimeCreaseMapMatchesArchivedCyclicOracleFromArchivedFinalState) {
+    const auto input = fce::load_simulator_input(kCyclicCaseDir.string());
+    const auto archived_final = fce::io::read_config(
+        (fs::path(kOracleDir) / "graphene_cyclic_crumple" / "simulator_run" / "nano_final_config.dat").string(),
+        input.dims.numnods,
+        input.dims.numele,
+        input.dims.ngauss);
+    const auto archived_checkpoint = fce::io::read_checkpoint(
+        (fs::path(kOracleDir) / "graphene_cyclic_crumple" / "simulator_run" / "nano_checkpoint.dat").string(),
+        input.dims.numnods,
+        input.dims.numele,
+        input.dims.ngauss,
+        /*has_crease_memory=*/true);
+
+    auto state = fce::make_runtime_state(input);
+    state.coords = archived_final.coords;
+    state.eta = archived_final.eta;
+    state.K0_ref = archived_checkpoint.K0_ref;
+
+    const fs::path temp_dir = make_temp_dir();
+    ASSERT_NO_THROW(fce::write_crease_map(input, state, temp_dir.string()));
+
+    const auto actual = read_crease_rows(temp_dir / "crease_map.dat");
+    const auto expected = read_crease_rows(
+        fs::path(kOracleDir) / "graphene_cyclic_crumple" / "simulator_run" / "crease_map.dat");
+    ASSERT_EQ(actual.size(), expected.size());
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        EXPECT_EQ(actual[i].ielem, expected[i].ielem) << "row " << i;
+        EXPECT_NEAR(actual[i].kappa_mean, expected[i].kappa_mean, 1e-8) << "row " << i;
+        EXPECT_NEAR(actual[i].kappa_max, expected[i].kappa_max, 1e-8) << "row " << i;
+        EXPECT_EQ(actual[i].is_creased, expected[i].is_creased) << "row " << i;
+        EXPECT_EQ(actual[i].n_neigh, expected[i].n_neigh) << "row " << i;
+        EXPECT_NEAR(actual[i].min_dihedral_deg, expected[i].min_dihedral_deg, 1e-4) << "row " << i;
+    }
+
+    fs::remove_all(temp_dir);
 }
 
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
