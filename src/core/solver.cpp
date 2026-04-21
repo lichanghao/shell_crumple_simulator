@@ -981,6 +981,13 @@ void pasapas(const SimulatorInput& input,
         if (should_stop_after_stage("after_minimize", iload, mpi)) {
             return;
         }
+
+        if ((bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31) &&
+            input.crease.ncrease == 1 &&
+            iload_in_cycle == bcs.nloadstep_comp) {
+            update_crease_reference(input, state);
+        }
+
         write_coord_dump_if_enabled(state, "before_output", iload, mpi);
         write_eta_dump_if_enabled(state, "before_output", iload, mpi);
         if (should_stop_after_stage("before_output", iload, mpi)) {
@@ -1088,6 +1095,7 @@ void pasapas(const SimulatorInput& input,
 
     if (mpi.is_root()) {
         write_final_config(input, state, output_dir);
+        write_crease_map(input, state, output_dir);
         write_mesh_series_index(output_dir, bcs, final_load);
     }
 }

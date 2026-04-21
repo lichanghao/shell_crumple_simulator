@@ -1,4 +1,6 @@
 #include "fce/runtime_output.hpp"
+#include "fce/element_state.hpp"
+#include "fce/ghost_nodes.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -30,6 +32,35 @@ Vec2 average_eta(const EtaField& eta, const int ielem, const int ngauss) {
     avg[0] /= static_cast<double>(ngauss);
     avg[1] /= static_cast<double>(ngauss);
     return avg;
+}
+
+NeighborCoords12 gather_neighbor_patch(const Mesh& mesh,
+                                       const FlatCoords& coords_with_ghosts,
+                                       const int element_index) {
+    NeighborCoords12 xneigh{};
+    const auto& element = mesh.connect.at(static_cast<std::size_t>(element_index));
+    for (int inode = 0; inode < 12; ++inode) {
+        const int node_index = element.neigh_vert[inode];
+        const std::size_t base = static_cast<std::size_t>(3 * node_index);
+        xneigh[inode] = Vec3{
+            coords_with_ghosts.at(base),
+            coords_with_ghosts.at(base + 1),
+            coords_with_ghosts.at(base + 2),
+        };
+    }
+    return xneigh;
+}
+
+std::pair<ShapeGradient12, ShapeCurvature12> gauss_geometry_data(const GaussData& gauss,
+                                                                 const int igauss) {
+    ShapeGradient12 dn{};
+    ShapeCurvature12 ddn{};
+    const auto& sf = gauss.shapef.at(static_cast<std::size_t>(igauss));
+    for (int inode = 0; inode < 12; ++inode) {
+        dn[inode] = Vec2{sf[inode][1], sf[inode][2]};
+        ddn[inode] = Voigt3{sf[inode][3], sf[inode][4], sf[inode][5]};
+    }
+    return {dn, ddn};
 }
 
 void validate_runtime_output_state(const SimulatorInput& input,
@@ -142,6 +173,51 @@ std::string snapshot_filename(const int step) {
     return name.str();
 }
 
+void update_crease_reference(const SimulatorInput& input,
+                             RuntimeState& state) {
+    if (input.crease.ncrease != 1 || state.K0_ref.empty()) {
+        return;
+    }
+
+    FlatCoords coords_with_ghosts;
+    coords_with_ghosts.reserve(state.coords.size() * 3);
+    for (const auto& xyz : state.coords) {
+        coords_with_ghosts.push_back(xyz[0]);
+        coords_with_ghosts.push_back(xyz[1]);
+        coords_with_ghosts.push_back(xyz[2]);
+    }
+    coords_with_ghosts.resize(static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)));
+    ghost_nodes(input.mesh, coords_with_ghosts);
+
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        const auto xneigh = gather_neighbor_patch(input.mesh, coords_with_ghosts, ielem);
+        for (int igauss = 0; igauss < input.dims.ngauss; ++igauss) {
+            const auto [dn, ddn] = gauss_geometry_data(input.gauss, igauss);
+            const auto element_state = compute_element_state(
+                xneigh,
+                dn,
+                ddn,
+                input.ref_config.at(static_cast<std::size_t>(ielem)).F0,
+                Voigt3{0.0, 0.0, 0.0});
+            auto& k0 = state.K0_ref.at(static_cast<std::size_t>(ielem)).at(static_cast<std::size_t>(igauss));
+            const Voigt3 curv_eff{
+                element_state.curv0_elem[0] - k0[0],
+                element_state.curv0_elem[1] - k0[1],
+                element_state.curv0_elem[2] - k0[2],
+            };
+            const double kappa_mag = std::sqrt(curv_eff[0] * curv_eff[0] +
+                                               curv_eff[1] * curv_eff[1] +
+                                               curv_eff[2] * curv_eff[2]);
+            if (kappa_mag <= input.crease.kappa_cr) {
+                continue;
+            }
+            for (int axis = 0; axis < 3; ++axis) {
+                k0[axis] += input.crease.alpha_lock * curv_eff[axis];
+            }
+        }
+    }
+}
+
 void write_mesh_snapshot(const SimulatorInput& input,
                          const RuntimeState& state,
                          const std::string& output_dir,
@@ -230,6 +306,98 @@ void write_mesh_snapshot(const SimulatorInput& input,
     out << "    </Piece>\n";
     out << "  </UnstructuredGrid>\n";
     out << "</VTKFile>\n";
+}
+
+void write_crease_map(const SimulatorInput& input,
+                      const RuntimeState& state,
+                      const std::string& output_dir) {
+    if (input.crease.ncrease != 1 || state.K0_ref.empty()) {
+        return;
+    }
+
+    validate_runtime_output_state(input, state, /*step=*/0);
+
+    FlatCoords coords_with_ghosts;
+    coords_with_ghosts.reserve(state.coords.size() * 3);
+    for (const auto& xyz : state.coords) {
+        coords_with_ghosts.push_back(xyz[0]);
+        coords_with_ghosts.push_back(xyz[1]);
+        coords_with_ghosts.push_back(xyz[2]);
+    }
+    coords_with_ghosts.resize(static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)));
+    ghost_nodes(input.mesh, coords_with_ghosts);
+
+    std::vector<Vec3> elem_norm(static_cast<std::size_t>(input.mesh.numele), Vec3{0.0, 0.0, 0.0});
+    std::vector<double> kappa_mean(static_cast<std::size_t>(input.mesh.numele), 0.0);
+    std::vector<double> kappa_max(static_cast<std::size_t>(input.mesh.numele), 0.0);
+    std::vector<int> is_creased(static_cast<std::size_t>(input.mesh.numele), 0);
+
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        const auto xneigh = gather_neighbor_patch(input.mesh, coords_with_ghosts, ielem);
+        const auto [dn, ddn] = gauss_geometry_data(input.gauss, /*igauss=*/0);
+        const auto element_state = compute_element_state(
+            xneigh,
+            dn,
+            ddn,
+            input.ref_config.at(static_cast<std::size_t>(ielem)).F0,
+            Voigt3{0.0, 0.0, 0.0});
+        elem_norm[static_cast<std::size_t>(ielem)] = element_state.metric.xnor_elem;
+
+        double mean = 0.0;
+        double max_value = 0.0;
+        for (int igauss = 0; igauss < input.dims.ngauss; ++igauss) {
+            const auto& k0 = state.K0_ref.at(static_cast<std::size_t>(ielem)).at(static_cast<std::size_t>(igauss));
+            const double magnitude = std::sqrt(k0[0] * k0[0] + k0[1] * k0[1] + k0[2] * k0[2]);
+            mean += magnitude;
+            max_value = std::max(max_value, magnitude);
+        }
+        mean /= static_cast<double>(input.dims.ngauss);
+        kappa_mean[static_cast<std::size_t>(ielem)] = mean;
+        kappa_max[static_cast<std::size_t>(ielem)] = max_value;
+        is_creased[static_cast<std::size_t>(ielem)] = mean > input.crease.kappa_cr ? 1 : 0;
+    }
+
+    const std::filesystem::path path = std::filesystem::path(output_dir) / "crease_map.dat";
+    std::ofstream out(path, std::ios::out | std::ios::trunc);
+    if (!out) {
+        throw std::runtime_error("cannot open " + path.string());
+    }
+
+    out << "! crease_map.dat - Module 4 crease detection & facet analysis\n";
+    out << "! Columns: ielem  kappa_mean(1/nm)  kappa_max(1/nm)  is_creased  n_neigh  min_dihedral_deg\n";
+    out << std::uppercase << std::scientific << std::setprecision(8);
+
+    int n_creased = 0;
+    for (int ielem = 0; ielem < input.mesh.numele; ++ielem) {
+        const auto& element = input.mesh.connect.at(static_cast<std::size_t>(ielem));
+        double min_dihedral = 180.0;
+        for (int j = 0; j < element.num_neigh_elem; ++j) {
+            const int jelem = element.neigh_elem[j];
+            if (jelem <= 0 || jelem > input.mesh.numele) {
+                continue;
+            }
+            const auto& other = elem_norm.at(static_cast<std::size_t>(jelem - 1));
+            const auto& normal = elem_norm.at(static_cast<std::size_t>(ielem));
+            double dot_nn = normal[0] * other[0] + normal[1] * other[1] + normal[2] * other[2];
+            dot_nn = std::max(-1.0, std::min(1.0, dot_nn));
+            const double dihedral = std::acos(dot_nn) * 180.0 / 3.14159265358979323846;
+            min_dihedral = std::min(min_dihedral, dihedral);
+        }
+        out << std::setw(8) << ielem + 1
+            << std::setw(16) << kappa_mean.at(static_cast<std::size_t>(ielem))
+            << std::setw(16) << kappa_max.at(static_cast<std::size_t>(ielem))
+            << std::setw(4) << is_creased.at(static_cast<std::size_t>(ielem))
+            << std::setw(5) << element.num_neigh_elem
+            << std::fixed << std::setprecision(4) << std::setw(12) << min_dihedral
+            << std::scientific << std::setprecision(8) << "\n";
+        if (is_creased.at(static_cast<std::size_t>(ielem)) == 1) {
+            ++n_creased;
+        }
+    }
+    out << "!\n";
+    out << "! Creased elements : " << n_creased << " / " << input.mesh.numele << "\n";
+    out << std::uppercase << std::scientific << std::setprecision(6)
+        << "! kappa_cr (1/nm)  : " << input.crease.kappa_cr << "\n";
 }
 
 void write_mesh_series_index(const std::string& output_dir,

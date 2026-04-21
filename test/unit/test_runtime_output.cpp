@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -10,6 +12,7 @@
 #include <iterator>
 #include <stdexcept>
 #include <string>
+#include <sstream>
 
 namespace {
 
@@ -17,6 +20,8 @@ namespace fs = std::filesystem;
 
 const fs::path kXmlValidatorScript =
     fs::path(ORACLE_DIR).parent_path() / "support" / "validate_vtk_xml.py";
+const fs::path kCyclicCaseDir =
+    fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "prepro_run";
 
 fs::path make_temp_dir() {
     std::array<char, 256> pattern{};
@@ -38,6 +43,52 @@ std::string read_file(const fs::path& path) {
         throw std::runtime_error("cannot open file: " + path.string());
     }
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+fce::Coords read_fortran_coord_dump(const fs::path& path) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open coordinate dump: " + path.string());
+    }
+    fce::Coords coords;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        std::size_t idx = 0;
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+        if (!(row >> idx >> x >> y >> z)) {
+            continue;
+        }
+        coords.push_back(fce::Vec3{x, y, z});
+    }
+    return coords;
+}
+
+std::vector<std::vector<fce::Vec2>> read_fortran_eta_dump(const fs::path& path,
+                                                          const int numele,
+                                                          const int ngauss) {
+    std::ifstream in(path);
+    if (!in) {
+        throw std::runtime_error("cannot open eta dump: " + path.string());
+    }
+    std::vector<std::vector<fce::Vec2>> eta(
+        static_cast<std::size_t>(numele),
+        std::vector<fce::Vec2>(static_cast<std::size_t>(ngauss), fce::Vec2{0.0, 0.0}));
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        std::size_t ielem = 0;
+        std::size_t igauss = 0;
+        double eta1 = 0.0;
+        double eta2 = 0.0;
+        if (!(row >> ielem >> igauss >> eta1 >> eta2)) {
+            continue;
+        }
+        eta.at(ielem - 1).at(igauss - 1) = fce::Vec2{eta1, eta2};
+    }
+    return eta;
 }
 
 std::string shell_quote(const fs::path& path) {
@@ -144,5 +195,60 @@ TEST(RuntimeOutput, RejectsInvalidRuntimeState) {
 
     const fs::path temp_dir = make_temp_dir();
     EXPECT_THROW(fce::write_mesh_snapshot(input, state, temp_dir.string(), 0), std::runtime_error);
+    fs::remove_all(temp_dir);
+}
+
+TEST(RuntimeOutput, UpdateCreaseReferenceLocksNonzeroCurvatureWhenThresholdIsZero) {
+    auto input = fce::load_simulator_input(kCyclicCaseDir.string());
+    ASSERT_EQ(input.crease.ncrease, 1);
+    input.crease.kappa_cr = 0.0;
+    input.crease.alpha_lock = 1.0;
+
+    auto state = fce::make_runtime_state(input);
+    state.coords = read_fortran_coord_dump(
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "replay_step1_accepted_2.dat");
+    state.eta = read_fortran_eta_dump(
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "replay_step1_accepted_2_eta.dat",
+        input.mesh.numele,
+        input.dims.ngauss);
+
+    fce::update_crease_reference(input, state);
+
+    double max_abs = 0.0;
+    for (const auto& elem_k0 : state.K0_ref) {
+        for (const auto& kappa : elem_k0) {
+            for (double value : kappa) {
+                max_abs = std::max(max_abs, std::abs(value));
+            }
+        }
+    }
+    EXPECT_GT(max_abs, 1.0e-6);
+}
+
+TEST(RuntimeOutput, WritesCreaseMapForCyclicRuntimeState) {
+    auto input = fce::load_simulator_input(kCyclicCaseDir.string());
+    ASSERT_EQ(input.crease.ncrease, 1);
+    input.crease.kappa_cr = 0.0;
+    input.crease.alpha_lock = 1.0;
+
+    auto state = fce::make_runtime_state(input);
+    state.coords = read_fortran_coord_dump(
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "replay_step1_accepted_2.dat");
+    state.eta = read_fortran_eta_dump(
+        fs::path(ORACLE_DIR) / "graphene_cyclic_crumple" / "replay_step1_accepted_2_eta.dat",
+        input.mesh.numele,
+        input.dims.ngauss);
+    fce::update_crease_reference(input, state);
+
+    const fs::path temp_dir = make_temp_dir();
+    ASSERT_NO_THROW(fce::write_crease_map(input, state, temp_dir.string()));
+
+    const fs::path crease_map = temp_dir / "crease_map.dat";
+    ASSERT_TRUE(fs::exists(crease_map));
+    const std::string content = read_file(crease_map);
+    EXPECT_NE(content.find("crease_map.dat"), std::string::npos);
+    EXPECT_NE(content.find("Creased elements"), std::string::npos);
+    EXPECT_NE(content.find("3200"), std::string::npos);
+
     fs::remove_all(temp_dir);
 }

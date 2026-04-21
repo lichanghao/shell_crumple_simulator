@@ -2563,6 +2563,24 @@ TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRun) {
     fs::remove_all(uninterrupted_root);
 }
 
+TEST_F(E2ECyclicRuntime, CrunchItWritesCreaseMapForShortCyclicRun) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    configure_short_cyclic_restart_case(temp_case_dir_);
+    auto crease = fce::io::read_crease((temp_case_dir_ / "nano_crease.dat").string(), 0, 0);
+    crease.kappa_cr = 0.0;
+    crease.alpha_lock = 1.0;
+    fce::io::write_crease((temp_case_dir_ / "nano_crease.dat").string(), crease, 0, 0);
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 4), 0);
+
+    const fs::path crease_map = temp_case_dir_ / "crease_map.dat";
+    ASSERT_TRUE(fs::exists(crease_map));
+    const std::string content = read_file(crease_map);
+    EXPECT_NE(content.find("crease_map.dat"), std::string::npos);
+    EXPECT_NE(content.find("Creased elements"), std::string::npos);
+}
+
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
     const auto input = fce::load_simulator_input(temp_case_dir_.string());
     const std::array<int, 3> replay_steps{1, 25, 50};
