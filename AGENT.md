@@ -96,6 +96,7 @@ Frequently used focused commands:
 - The main unresolved runtime gap is still AC-7: the executable-path compression run diverges from the archived Fortran trajectory.
 - Runtime vdW/self-contact assembly is still not translated end to end.
 - Cyclic controller, crease memory, checkpoint/restart, and MPI parity verification are still incomplete.
+  Shared checkpoint rejection/loading is verified, short-case nonzero `K0_ref` restart parity is covered, and archived `crease_map.dat` parity is covered, but the main cyclic step-one replay lane and multi-rank acceptance are still open.
 
 ## Working rules for future edits
 

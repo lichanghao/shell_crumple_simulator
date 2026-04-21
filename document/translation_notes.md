@@ -22,7 +22,7 @@ This document records the current C++ translation status against the canonical F
 | Runtime assembly path | translated and partially verified | Archive-backed compression trajectory, post-free parity, first constrained-step replay, and archived VTU-vs-row checks are green; the remaining live executable-path blocker is the cyclic step-one replay row. |
 | Runtime VTU/PVD output | translated and partially verified | XML parseability and archived compression field checks are covered; executable-path real `nvdw=1` oracle coverage is still missing. |
 | Runtime vdW/self-contact assembly | not yet translated | Preprocessor-side support exists, but simulator-side `vdw_modules.f90` behavior is still pending. |
-| Cyclic controller, crease memory, checkpoint/restart | not yet translated end to end | AC-9 and AC-10 remain open. |
+| Cyclic controller, crease memory, checkpoint/restart | partially verified | Shared checkpoint rejection/loading is translated; short-case nonzero `K0_ref` restart parity and archived `crease_map.dat` parity are covered, but the main cyclic step-one replay lane and full restart/MPI acceptance remain open. |
 | MPI parity verification | partial | MPI wrapper and element partitioning exist, but `np=1/2/4` acceptance coverage is still pending. |
 
 ## Executable and library mapping
@@ -87,6 +87,13 @@ The repository now validates generated `.vtu` and `.pvd` files with a parser-bac
 ### AC-9, AC-10, and AC-11
 
 Cyclic `nCodeLoad=30/31`, irreversible crease memory, checkpoint/restart, and multi-rank parity remain milestone-level open work.
+
+Recent progress on that surface is narrower but real:
+
+- Shared checkpoint rejection/loading now lives in `load_runtime_checkpoint(...)`, and malformed/rank-mismatch checkpoint rejection is verified without depending on the MPI launcher path.
+- The short synthetic cyclic restart lane now proves that an intermediate serial checkpoint can carry nonzero `K0_ref`, that `load_runtime_checkpoint(...)` reloads `coords`, `eta`, and `K0_ref` exactly from that checkpoint, and that resumed vs uninterrupted short runs agree on `energy.dat`, `force.dat`, `output.dat`, `nano_final_config.dat`, `crease_map.dat`, and the final `nano_checkpoint.dat`.
+- Archived-oracle `crease_map.dat` parity is now covered by reconstructing the archived cyclic final state from `simulator_run/nano_final_config.dat` plus `simulator_run/nano_checkpoint.dat` and comparing the emitted six-column `crease_map.dat` numerically against the archived oracle.
+- These checks still do not close AC-9/AC-10 because the primary executable-path cyclic replay lane (`E2ECyclicRuntime.CrunchItReplaysCommittedCyclicStepOneTraceDeterministically`) remains red and multi-rank restart/parity coverage is still missing.
 
 ## Porting rules that have repeatedly mattered
 
