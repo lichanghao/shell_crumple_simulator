@@ -2713,6 +2713,10 @@ TEST_F(E2ECyclicRuntime, ShortCyclicRestartPreservesCreaseMapAndCheckpointState)
               read_file(uninterrupted_case / "nano_final_config.dat"));
     EXPECT_EQ(read_file(temp_case_dir_ / "crease_map.dat"),
               read_file(uninterrupted_case / "crease_map.dat"));
+    ASSERT_TRUE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
+    ASSERT_TRUE(fs::exists(uninterrupted_case / "nano_checkpoint.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "nano_checkpoint.dat"),
+              read_file(uninterrupted_case / "nano_checkpoint.dat"));
 
     fs::remove_all(uninterrupted_root);
 }
