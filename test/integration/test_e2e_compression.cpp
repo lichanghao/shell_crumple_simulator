@@ -1199,6 +1199,14 @@ void configure_short_cyclic_restart_case(const fs::path& case_dir) {
     fce::io::write_bcs((case_dir / "nano_BCs.dat").string(), bcs);
 }
 
+void configure_short_cyclic_crease_case(const fs::path& case_dir) {
+    configure_short_cyclic_restart_case(case_dir);
+    auto crease = fce::io::read_crease((case_dir / "nano_crease.dat").string(), 0, 0);
+    crease.kappa_cr = 0.0;
+    crease.alpha_lock = 1.0;
+    fce::io::write_crease((case_dir / "nano_crease.dat").string(), crease, 0, 0);
+}
+
 TEST(CompressionCaseFiles, ArchivedFortranImperfectionTraceFixtureIsNonSynthetic) {
     ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
 
@@ -2563,14 +2571,79 @@ TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRun) {
     fs::remove_all(uninterrupted_root);
 }
 
+TEST_F(E2ECyclicRuntime, ShortCyclicCheckpointCapturesNonzeroCreaseState) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    configure_short_cyclic_crease_case(temp_case_dir_);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 2), 0);
+    ASSERT_TRUE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
+
+    const auto dims = fce::io::read_dims((temp_case_dir_ / "nano_dims.dat").string());
+    const auto checkpoint = fce::io::read_checkpoint((temp_case_dir_ / "nano_checkpoint.dat").string(),
+                                                     dims.numnods,
+                                                     dims.numele,
+                                                     dims.ngauss,
+                                                     /*has_crease_memory=*/true);
+    double max_abs = 0.0;
+    for (const auto& elem_k0 : checkpoint.K0_ref) {
+        for (const auto& kappa : elem_k0) {
+            for (double value : kappa) {
+                max_abs = std::max(max_abs, std::abs(value));
+            }
+        }
+    }
+    EXPECT_GT(max_abs, 1.0e-6);
+}
+
+TEST_F(E2ECyclicRuntime, ShortCyclicRestartPreservesCreaseMapAndCheckpointState) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    configure_short_cyclic_crease_case(temp_case_dir_);
+
+    const fs::path uninterrupted_root = make_temp_dir();
+    const fs::path uninterrupted_case = uninterrupted_root / "prepro_run";
+    fs::copy(temp_case_dir_, uninterrupted_case, fs::copy_options::recursive);
+
+    ASSERT_EQ(run_crunch_it(uninterrupted_case, 4), 0);
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 2), 0);
+    ASSERT_TRUE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
+    const auto dims = fce::io::read_dims((temp_case_dir_ / "nano_dims.dat").string());
+    const auto checkpoint = fce::io::read_checkpoint((temp_case_dir_ / "nano_checkpoint.dat").string(),
+                                                     dims.numnods,
+                                                     dims.numele,
+                                                     dims.ngauss,
+                                                     /*has_crease_memory=*/true);
+    double max_abs = 0.0;
+    for (const auto& elem_k0 : checkpoint.K0_ref) {
+        for (const auto& kappa : elem_k0) {
+            for (double value : kappa) {
+                max_abs = std::max(max_abs, std::abs(value));
+            }
+        }
+    }
+    ASSERT_GT(max_abs, 1.0e-6);
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 4), 0);
+
+    EXPECT_EQ(read_file(temp_case_dir_ / "energy.dat"),
+              read_file(uninterrupted_case / "energy.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "force.dat"),
+              read_file(uninterrupted_case / "force.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "output.dat"),
+              read_file(uninterrupted_case / "output.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "nano_final_config.dat"),
+              read_file(uninterrupted_case / "nano_final_config.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "crease_map.dat"),
+              read_file(uninterrupted_case / "crease_map.dat"));
+
+    fs::remove_all(uninterrupted_root);
+}
+
 TEST_F(E2ECyclicRuntime, CrunchItWritesCreaseMapForShortCyclicRun) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
 
-    configure_short_cyclic_restart_case(temp_case_dir_);
-    auto crease = fce::io::read_crease((temp_case_dir_ / "nano_crease.dat").string(), 0, 0);
-    crease.kappa_cr = 0.0;
-    crease.alpha_lock = 1.0;
-    fce::io::write_crease((temp_case_dir_ / "nano_crease.dat").string(), crease, 0, 0);
+    configure_short_cyclic_crease_case(temp_case_dir_);
 
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 4), 0);
 
