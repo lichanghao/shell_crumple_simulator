@@ -2773,6 +2773,68 @@ TEST_F(E2ECyclicRuntime, RuntimeCreaseMapMatchesArchivedCyclicOracleFromArchived
     fs::remove_all(temp_dir);
 }
 
+TEST_F(E2ECyclicRuntime, ArchivedCyclicCheckpointLoadsThroughSharedResumePath) {
+    const fs::path temp_root = make_temp_dir();
+    const fs::path temp_case = temp_root / "prepro_run";
+    fs::copy(kCyclicCaseDir, temp_case, fs::copy_options::recursive);
+    fs::copy_file(fs::path(kOracleDir) / "graphene_cyclic_crumple" / "simulator_run" / "nano_checkpoint.dat",
+                  temp_case / "nano_checkpoint.dat",
+                  fs::copy_options::overwrite_existing);
+
+    const auto input = fce::load_simulator_input(temp_case.string());
+    const auto expected = fce::io::read_checkpoint((temp_case / "nano_checkpoint.dat").string(),
+                                                   input.dims.numnods,
+                                                   input.dims.numele,
+                                                   input.dims.ngauss,
+                                                   /*has_crease_memory=*/true);
+    const auto resume = fce::load_runtime_checkpoint(input,
+                                                     temp_case.string(),
+                                                     /*current_nprocs=*/1,
+                                                     fce::make_runtime_state(input));
+    ASSERT_EQ(resume.status, fce::CheckpointResumeStatus::loaded);
+    ASSERT_EQ(resume.iload_start, expected.iload + 1);
+    ASSERT_EQ(resume.state.coords.size(), expected.config.coords.size());
+    ASSERT_EQ(resume.state.eta.size(), expected.config.eta.size());
+    ASSERT_EQ(resume.state.K0_ref.size(), expected.K0_ref.size());
+
+    double max_coord_abs = 0.0;
+    for (std::size_t inode = 0; inode < expected.config.coords.size(); ++inode) {
+        for (int axis = 0; axis < 3; ++axis) {
+            max_coord_abs = std::max(max_coord_abs,
+                                     std::abs(resume.state.coords[inode][axis] -
+                                              expected.config.coords[inode][axis]));
+        }
+    }
+    EXPECT_LE(max_coord_abs, 1e-12);
+
+    double max_eta_abs = 0.0;
+    for (std::size_t ielem = 0; ielem < expected.config.eta.size(); ++ielem) {
+        for (std::size_t igauss = 0; igauss < expected.config.eta[ielem].size(); ++igauss) {
+            for (int axis = 0; axis < 2; ++axis) {
+                max_eta_abs = std::max(max_eta_abs,
+                                       std::abs(resume.state.eta[ielem][igauss][axis] -
+                                                expected.config.eta[ielem][igauss][axis]));
+            }
+        }
+    }
+    EXPECT_LE(max_eta_abs, 1e-12);
+
+    double max_k0_abs = 0.0;
+    for (std::size_t ielem = 0; ielem < expected.K0_ref.size(); ++ielem) {
+        for (std::size_t igauss = 0; igauss < expected.K0_ref[ielem].size(); ++igauss) {
+            for (int axis = 0; axis < 3; ++axis) {
+                max_k0_abs = std::max(max_k0_abs,
+                                      std::abs(resume.state.K0_ref[ielem][igauss][axis] -
+                                               expected.K0_ref[ielem][igauss][axis]));
+            }
+        }
+    }
+    EXPECT_LE(max_k0_abs, 1e-12);
+
+    fs::remove_all(temp_root);
+
+}
+
 TEST_F(E2ECompression, RuntimeOutputReplaysArchivedCompressionSnapshotsIndependentlyOfSolver) {
     const auto input = fce::load_simulator_input(temp_case_dir_.string());
     const std::array<int, 3> replay_steps{1, 25, 50};
