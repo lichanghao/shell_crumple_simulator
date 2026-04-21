@@ -173,6 +173,11 @@ program dump_cyclic_replay_element_oracle
     eta_final = eta_in
     maxn = 100
     call newton_inner(C_elem, curvppal, vppal, mat1, eta_final, W, dW, crit, niter, maxn, fail_mode)
+    if (fail_mode .ne. 0) then
+      write(*, '(A,I0,A,I0,A,I0)') "newton_inner failed for element ", ielem, &
+        " gauss ", igauss, " fail_mode ", fail_mode
+      stop 2
+    end if
 
     do ibond = 1, 3
       Ei(ibond, :) = mat1%A0 * mat1%E(ibond, :) + eta_final(:)
@@ -303,6 +308,7 @@ contains
     open(unit=13, file=path, status="old", action="read")
     do inode = 1, numnods
       read(13, *) idx, x0(inode, 1), x0(inode, 2), x0(inode, 3)
+      if (idx .ne. inode) stop "coord dump ordering mismatch"
     end do
     close(13)
   end subroutine read_coord_dump
