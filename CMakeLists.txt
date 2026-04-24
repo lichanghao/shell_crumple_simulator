@@ -133,6 +133,7 @@ target_link_libraries(integration_tests PRIVATE
   fce_core
   GTest::gtest_main
 )
+add_dependencies(integration_tests crunch_it)
 target_include_directories(integration_tests PRIVATE
   ${CMAKE_SOURCE_DIR}/test/support
 )
@@ -148,6 +149,7 @@ target_link_libraries(checkpoint_integration_tests PRIVATE
   fce_core
   GTest::gtest_main
 )
+add_dependencies(checkpoint_integration_tests crunch_it)
 target_include_directories(checkpoint_integration_tests PRIVATE
   ${CMAKE_SOURCE_DIR}/test/support
 )
