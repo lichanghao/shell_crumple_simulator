@@ -2,6 +2,7 @@
 #include "fce/element_state.hpp"
 #include "fce/ghost_nodes.hpp"
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>

@@ -7,8 +7,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <cstdio>
+#include <iomanip>
 
 namespace fce {
 namespace io {
@@ -160,8 +162,6 @@ static std::string fmt_d(double v) {
     }
     return s;
 }
-
-#include <iomanip>
 
 GeneralData read_general(const std::string& path) {
     FileReader r(path);
