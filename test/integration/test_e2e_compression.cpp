@@ -1595,6 +1595,39 @@ TEST_F(RuntimeOutputBilayerCase, CrunchItRunsArchivedBilayerStepOneCase) {
     EXPECT_TRUE(std::isfinite(force_rows.front().values[1]));
 }
 
+TEST_F(RuntimeOutputBilayerCase, BilayerSingleStepAssemblyMatchesAcrossEightMpiRanks) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    if (!mpi_tests_enabled()) {
+        GTEST_SKIP() << "MPI bilayer vdW assembly is opt-in; set FCE_RUN_MPI_TESTS=1 to run it";
+    }
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_FALSE(input.vdw.tub_partitions.empty());
+
+    const auto state = fce::make_runtime_state(input);
+    ASSERT_NO_THROW(fce::write_mesh_snapshot(input, state, temp_case_dir_.string(), 0));
+
+    const fs::path np1_stdout = temp_case_dir_.parent_path() / "bilayer_np1.log";
+    const fs::path np8_stdout = temp_case_dir_.parent_path() / "bilayer_np8.log";
+    ASSERT_EQ(run_mpi_single_step_assembly(temp_case_dir_, 1, 0, np1_stdout), 0)
+        << read_file(np1_stdout);
+    ASSERT_EQ(run_mpi_single_step_assembly(temp_case_dir_, 8, 0, np8_stdout), 0)
+        << read_file(np8_stdout);
+
+    const double np1_energy = read_labeled_double(np1_stdout, "assembled_energy");
+    const double np8_energy = read_labeled_double(np8_stdout, "assembled_energy");
+    EXPECT_TRUE(std::isfinite(np1_energy));
+    EXPECT_GT(std::abs(np1_energy), 1e-12);
+    EXPECT_LE(relative_error(np8_energy, np1_energy, 1e-12), 1e-10);
+    EXPECT_EQ(read_labeled_int(np8_stdout, "inner_fail"),
+              read_labeled_int(np1_stdout, "inner_fail"));
+    EXPECT_EQ(read_labeled_int(np1_stdout, "force_dofs"),
+              3 * (input.mesh.numnods + input.mesh.nedge));
+    EXPECT_EQ(read_labeled_int(np8_stdout, "force_dofs"),
+              3 * (input.mesh.numnods + input.mesh.nedge));
+}
+
 TEST_F(E2ECompression, CrunchItPostMinimizeFreeStateMatchesCanonicalFortranDump) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kPostMinimizeFreeFixture))
