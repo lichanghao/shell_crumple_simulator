@@ -2670,7 +2670,11 @@ TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergenc
                                      std::abs(actual_coords[inode][axis] - expected_coords[inode][axis]));
         }
     }
-    EXPECT_GT(max_coord_abs, 1e-5);
+    // AppleClang currently amplifies this seed to O(1e-5), while GCC keeps the
+    // same first-divergence surface at O(1e-6). Keep this diagnostic above the
+    // accepted-state-2 parity tolerance without making it compiler-family
+    // specific.
+    EXPECT_GT(max_coord_abs, 1e-6);
 
     const auto actual_eta = read_fortran_eta_dump_flat(dump_dir / "step1_accepted_3_eta.dat");
     const auto expected_eta = read_fortran_eta_dump_flat(kCyclicReplayAccepted3EtaFixture);
