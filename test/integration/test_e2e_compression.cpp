@@ -2648,6 +2648,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergenc
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3Fixture)) << "Missing accepted-state-3 coord fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3EtaFixture)) << "Missing accepted-state-3 eta fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3XfreeFixture)) << "Missing accepted-state-3 xfree fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3GfreeFixture)) << "Missing accepted-state-3 gfree fixture";
 
     const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_accept3";
     fs::create_directories(dump_dir);
@@ -2687,6 +2689,24 @@ TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergenc
         }
     }
     EXPECT_LE(max_eta_abs, 1e-12);
+
+    const auto actual_xfree = read_indexed_vector_dump(dump_dir / "step1_accepted_3_xfree.dat");
+    const auto expected_xfree = read_indexed_vector_dump(kCyclicReplayAccepted3XfreeFixture);
+    ASSERT_EQ(actual_xfree.size(), expected_xfree.size());
+    double max_xfree_abs = 0.0;
+    for (std::size_t i = 0; i < actual_xfree.size(); ++i) {
+        max_xfree_abs = std::max(max_xfree_abs, std::abs(actual_xfree[i] - expected_xfree[i]));
+    }
+    EXPECT_GT(max_xfree_abs, 1e-6);
+
+    const auto actual_gfree = read_indexed_vector_dump(dump_dir / "step1_accepted_3_gfree.dat");
+    const auto expected_gfree = read_indexed_vector_dump(kCyclicReplayAccepted3GfreeFixture);
+    ASSERT_EQ(actual_gfree.size(), expected_gfree.size());
+    double max_gfree_abs = 0.0;
+    for (std::size_t i = 0; i < actual_gfree.size(); ++i) {
+        max_gfree_abs = std::max(max_gfree_abs, std::abs(actual_gfree[i] - expected_gfree[i]));
+    }
+    EXPECT_GT(max_gfree_abs, 1e-3);
 }
 
 TEST_F(E2ECyclicRuntime, AcceptedState55ShowsCommittedFortranReplayDivergence) {
