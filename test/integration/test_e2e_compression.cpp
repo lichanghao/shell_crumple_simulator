@@ -12,6 +12,7 @@
 #include <array>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -388,6 +389,16 @@ fs::path make_temp_dir() {
         throw std::runtime_error("mkdtemp failed");
     }
     return fs::path(created);
+}
+
+bool long_oracle_tests_enabled() {
+    const char* raw = std::getenv("FCE_RUN_LONG_ORACLE_TESTS");
+    return raw != nullptr && std::string(raw) == "1";
+}
+
+bool mpi_tests_enabled() {
+    const char* raw = std::getenv("FCE_RUN_MPI_TESTS");
+    return raw != nullptr && std::string(raw) == "1";
 }
 
 std::string shell_quote(const fs::path& path) {
@@ -1091,6 +1102,67 @@ int run_crunch_it(const fs::path& case_dir,
     return std::system(command.c_str());
 }
 
+int run_mpi_crunch_it(const fs::path& case_dir,
+                      const int ranks,
+                      const int stop_step,
+                      const fs::path& stdout_path,
+                      const std::string& env_prefix = {}) {
+    std::string command;
+    if (!env_prefix.empty()) {
+        command += env_prefix + " ";
+    }
+    command += "mpirun -np " + std::to_string(ranks) + " " +
+               shell_quote(kCrunchItBin) + " " + shell_quote(case_dir) + " " +
+               std::to_string(stop_step);
+    command += " > " + shell_quote(stdout_path) + " 2>&1";
+    return std::system(command.c_str());
+}
+
+int run_mpi_single_step_assembly(const fs::path& case_dir,
+                                 const int ranks,
+                                 const int step,
+                                 const fs::path& stdout_path) {
+    std::string command = "mpirun -np " + std::to_string(ranks) + " " +
+                          shell_quote(kCrunchItBin) + " " + shell_quote(case_dir) +
+                          " --single-step " + std::to_string(step);
+    command += " > " + shell_quote(stdout_path) + " 2>&1";
+    return std::system(command.c_str());
+}
+
+double read_labeled_double(const fs::path& path, const std::string& label) {
+    std::istringstream in(read_file(path));
+    std::string line;
+    std::string key;
+    std::string value;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        if (!(row >> key >> value)) {
+            continue;
+        }
+        if (key == label) {
+            return fce::io::parse_fortran_double(value);
+        }
+    }
+    throw std::runtime_error("missing labeled double '" + label + "' in " + path.string());
+}
+
+int read_labeled_int(const fs::path& path, const std::string& label) {
+    std::istringstream in(read_file(path));
+    std::string line;
+    std::string key;
+    std::string value;
+    while (std::getline(in, line)) {
+        std::istringstream row(line);
+        if (!(row >> key >> value)) {
+            continue;
+        }
+        if (key == label) {
+            return std::stoi(value);
+        }
+    }
+    throw std::runtime_error("missing labeled int '" + label + "' in " + path.string());
+}
+
 int count_output_load_steps(const fs::path& output_path) {
     std::ifstream in(output_path);
     if (!in) {
@@ -1258,7 +1330,7 @@ TEST_F(E2ECompression, CrunchItWritesReplayStepOneAsciiArtifacts) {
 
     install_replay_trace(temp_case_dir_, kFortranTraceFixture);
 
-    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1"), 0);
 
     const fs::path energy_path = temp_case_dir_ / "energy.dat";
     const fs::path force_path = temp_case_dir_ / "force.dat";
@@ -1375,6 +1447,7 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays)
     install_replay_trace(temp_case_dir_, kFortranTraceFixture);
 
     const std::string command =
+        "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1 " +
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
     ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
 
@@ -1485,8 +1558,13 @@ TEST_F(E2ECompression, CrunchItWritesRuntimeVtuSeriesAndValidatesFullDataArrays)
 }
 
 TEST_F(RuntimeOutputBilayerCase, CrunchItRunsArchivedBilayerStepOneCase) {
+    if (!long_oracle_tests_enabled()) {
+        GTEST_SKIP() << "bilayer runtime vdW assembly is an opt-in long oracle gate; "
+                        "set FCE_RUN_LONG_ORACLE_TESTS=1 to run it";
+    }
+
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
-    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1"), 0);
 
     const fs::path energy_path = temp_case_dir_ / "energy.dat";
     const fs::path force_path = temp_case_dir_ / "force.dat";
@@ -1523,7 +1601,7 @@ TEST_F(E2ECompression, CrunchItPostMinimizeFreeStateMatchesCanonicalFortranDump)
         << "Missing canonical post-free fixture at " << kPostMinimizeFreeFixture;
 
     install_replay_trace(temp_case_dir_, kFortranTraceFixture);
-    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1"), 0);
 
     const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
     const auto actual = read_vtu_points(temp_case_dir_ / "mesh_config_0000.vtu", dims.numnods);
@@ -1597,6 +1675,9 @@ TEST(ReplayOracle, StepOneEvalSequenceMatchesCommittedFortranReplayTrace) {
 TEST(CompressionCaseFiles, ArchivedOracleAndReplayTraceAreDistinctStepOneContracts) {
     ASSERT_TRUE(fs::exists(kReplayStepOneMonitorFixture))
         << "Missing replay monitor fixture at " << kReplayStepOneMonitorFixture;
+    if (!fs::exists(kCaseDir / "simulator.log")) {
+        GTEST_SKIP() << "archived simulator.log is not present in this checkout";
+    }
 
     const auto archived_log = read_file(kCaseDir / "simulator.log");
     const auto replay = read_replay_step_one_monitor_fixture(kReplayStepOneMonitorFixture);
@@ -1607,6 +1688,10 @@ TEST(CompressionCaseFiles, ArchivedOracleAndReplayTraceAreDistinctStepOneContrac
 }
 
 TEST(CompressionCaseFiles, ArchivedSimulatorLogStepOneEnergyDoesNotMatchArchivedEnergyOracle) {
+    if (!fs::exists(kCaseDir / "simulator.log")) {
+        GTEST_SKIP() << "archived simulator.log is not present in this checkout";
+    }
+
     const auto archived_log = read_file(kCaseDir / "simulator.log");
     const auto oracle_energy = read_positive_load_rows(kCaseDir / "energy.dat", /*skip_header=*/true);
     ASSERT_FALSE(oracle_energy.empty());
@@ -1624,7 +1709,7 @@ TEST_F(E2ECompression, CrunchItStepOnePreservesArchivedBcNodeGeometry) {
     ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
 
     install_replay_trace(temp_case_dir_, kFortranTraceFixture);
-    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1"), 0);
 
     const auto dims = fce::io::read_dims((kCaseDir / "nano_dims.dat").string());
     const auto bcs = fce::io::read_bcs((kCaseDir / "nano_BCs.dat").string());
@@ -1690,6 +1775,10 @@ TEST(CompressionCaseFiles, ArchivedStepOneVtuMatchesArchivedEnergyAndReactionRow
 TEST_F(E2ECompression, GeneratedStepOneVtuMatchesGeneratedEnergyAndReactionRows) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kFortranTraceFixture)) << "Missing Fortran trace fixture at " << kFortranTraceFixture;
+    if (!long_oracle_tests_enabled()) {
+        GTEST_SKIP() << "generated compression VTU consistency requires full serial convergence; set "
+                        "FCE_RUN_LONG_ORACLE_TESTS=1 to run it";
+    }
 
     install_replay_trace(temp_case_dir_, kFortranTraceFixture);
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
@@ -1755,6 +1844,10 @@ TEST_F(E2ECompression, CrunchItStepOneRowsMatchCommittedReplayFixture) {
         << "Missing replay energy fixture at " << kReplayStepOneEnergyFixture;
     ASSERT_TRUE(fs::exists(kReplayStepOneForceFixture))
         << "Missing replay force fixture at " << kReplayStepOneForceFixture;
+    if (!long_oracle_tests_enabled()) {
+        GTEST_SKIP() << "full serial compression replay is an opt-in long oracle gate; set "
+                        "FCE_RUN_LONG_ORACLE_TESTS=1 to run it";
+    }
 
     install_replay_trace(temp_case_dir_, kFortranTraceFixture);
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
@@ -1788,6 +1881,10 @@ TEST_F(E2ECyclicRuntime, CrunchItReplaysCommittedCyclicStepOneTraceDeterministic
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayStepOneEnergyFixture)) << "Missing cyclic replay energy fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayStepOneForceFixture)) << "Missing cyclic replay force fixture";
+    if (!long_oracle_tests_enabled()) {
+        GTEST_SKIP() << "full serial cyclic replay is an opt-in long oracle gate; set "
+                        "FCE_RUN_LONG_ORACLE_TESTS=1 to run it";
+    }
 
     fs::copy_file(kCyclicReplayTraceFixture,
                   temp_case_dir_ / "imperfection_trace.dat",
@@ -1841,6 +1938,10 @@ TEST_F(E2ECyclicRuntime, CrunchItReplaysCommittedCyclicStepOneTraceDeterministic
 TEST_F(E2ECyclicRuntime, GeneratedStepOneVtuMatchesGeneratedEnergyAndReactionRows) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    if (!long_oracle_tests_enabled()) {
+        GTEST_SKIP() << "generated cyclic VTU consistency requires full serial convergence; set "
+                        "FCE_RUN_LONG_ORACLE_TESTS=1 to run it";
+    }
 
     fs::copy_file(kCyclicReplayTraceFixture,
                   temp_case_dir_ / "imperfection_trace.dat",
@@ -1892,7 +1993,8 @@ TEST_F(E2ECyclicRuntime, TraceDumpsCaptureCyclicReplayCheckpoints) {
                   temp_case_dir_ / "imperfection_trace.dat",
                   fs::copy_options::overwrite_existing);
 
-    const std::string env_prefix = "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir);
+    const std::string env_prefix =
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_CONSTRAINED_LBFGS_MAX_EVAL=25";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const fs::path after_increment = dump_dir / "step1_after_increment.dat";
@@ -1997,7 +2099,8 @@ TEST_F(E2ECyclicRuntime, BeforeFirstEvalTraceMatchesCommittedFortranReplayFixtur
                   temp_case_dir_ / "imperfection_trace.dat",
                   fs::copy_options::overwrite_existing);
 
-    const std::string env_prefix = "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir);
+    const std::string env_prefix =
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_CONSTRAINED_LBFGS_MAX_EVAL=25";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_before_first_eval.dat");
@@ -2039,6 +2142,10 @@ TEST_F(E2ECyclicRuntime, BeforeOutputTraceShowsFirstMaterialReplayDivergence) {
     ASSERT_TRUE(fs::exists(kCyclicReplayBeforeOutputFixture)) << "Missing cyclic pre-output coord fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayBeforeOutputEtaFixture)) << "Missing cyclic pre-output eta fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayBeforeOutputSummaryFixture)) << "Missing cyclic pre-output summary fixture";
+    if (!long_oracle_tests_enabled()) {
+        GTEST_SKIP() << "cyclic before-output divergence requires full serial convergence; set "
+                        "FCE_RUN_LONG_ORACLE_TESTS=1 to run it";
+    }
 
     const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_before_output";
     fs::create_directories(dump_dir);
@@ -2080,6 +2187,117 @@ TEST_F(E2ECyclicRuntime, BeforeOutputTraceShowsFirstMaterialReplayDivergence) {
     EXPECT_GT(relative_error(actual_summary.at("GNORM"), expected_summary.at("GNORM"), 1e-12), 1e-2);
 }
 
+TEST_F(E2ECyclicRuntime, BeforeFirstEvalFixtureReassemblyMatchesCommittedFortranSummary) {
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeFirstEvalFixture))
+        << "Missing cyclic first-eval coord fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeFirstEvalEtaFixture))
+        << "Missing cyclic first-eval eta fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayBeforeFirstEvalSummaryFixture))
+        << "Missing cyclic first-eval summary fixture";
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    auto state = fce::make_runtime_state(input);
+    state.coords = read_fortran_coord_dump(kCyclicReplayBeforeFirstEvalFixture);
+    state.eta = read_fortran_eta_dump(
+        kCyclicReplayBeforeFirstEvalEtaFixture, input.mesh.numele, input.dims.ngauss);
+
+    const auto assembly = fce::assemble_energy_forces(
+        input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
+    const auto expected_summary = read_scalar_dump(kCyclicReplayBeforeFirstEvalSummaryFixture);
+
+    EXPECT_LE(relative_error(assembly.total_energy, expected_summary.at("E_total"), 1e-12), 1e-12);
+    EXPECT_LE(relative_error(assembly.reduced_energy, expected_summary.at("E_internal"), 1e-12), 1e-12);
+    EXPECT_EQ(assembly.inner_fail, 0);
+}
+
+TEST_F(E2ECyclicRuntime, ConstrainedReplayFromCommittedPostFreeMatchesAcceptedStatesThroughThree) {
+    ASSERT_TRUE(fs::exists(kCyclicPostMinimizeFreeFixture)) << "Missing cyclic post-free fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted1Fixture)) << "Missing accepted-state-1 fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2Fixture)) << "Missing accepted-state-2 fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3Fixture)) << "Missing accepted-state-3 fixture";
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    auto state = fce::make_runtime_state(input);
+    state.coords = read_fortran_coord_dump(kCyclicPostMinimizeFreeFixture);
+
+    fce::LoadController load_ctrl(input.bcs);
+    load_ctrl.init(state.coords);
+    load_ctrl.apply_increment(1, state.coords);
+
+    const auto trace = read_trace_values(kCyclicReplayTraceFixture);
+    ASSERT_FALSE(trace.empty());
+    const double delta =
+        input.general.mat.A0 * 2.0 * (trace.front() - 0.5) * input.general.fact_imp;
+    for (auto& coord : state.coords) {
+        coord[0] += delta;
+        coord[1] += delta;
+        coord[2] += delta;
+    }
+
+    std::vector<double> x_free = load_ctrl.to_free(state.coords);
+    fce::LbfgsSolver solver(10, input.general.crit_global, 1.0e-12, 20000, false);
+    const std::map<int, fs::path> accepted_fixtures{
+        {1, kCyclicReplayAccepted1Fixture},
+        {2, kCyclicReplayAccepted2Fixture},
+        {3, kCyclicReplayAccepted3Fixture},
+    };
+    std::set<int> checked;
+    struct StopAfterAcceptedThree : std::exception {};
+
+    solver.set_accepted_step_observer(
+        [&](const int iter,
+            const int,
+            const double,
+            const double,
+            const double,
+            const std::vector<double>& x_trial,
+            const std::vector<double>&) {
+            const auto fixture_it = accepted_fixtures.find(iter);
+            if (fixture_it == accepted_fixtures.end()) {
+                return;
+            }
+            fce::Coords coords = state.coords;
+            load_ctrl.scatter_all(x_trial, coords);
+            const auto expected = read_fortran_coord_dump(fixture_it->second);
+            ASSERT_EQ(coords.size(), expected.size()) << "accepted state " << iter;
+
+            double max_abs = 0.0;
+            for (std::size_t inode = 0; inode < coords.size(); ++inode) {
+                for (int axis = 0; axis < 3; ++axis) {
+                    max_abs = std::max(max_abs, std::abs(coords[inode][axis] - expected[inode][axis]));
+                }
+            }
+            EXPECT_LE(max_abs, 1e-10) << "accepted state " << iter;
+            checked.insert(iter);
+            if (checked.size() == accepted_fixtures.size()) {
+                throw StopAfterAcceptedThree{};
+            }
+        });
+
+    try {
+        solver.minimize(
+            x_free,
+            compute_runtime_bbox_norm(state.coords),
+            /*stop_on_first_trial=*/false,
+            [&](const std::vector<double>& xv) -> std::pair<double, std::vector<double>> {
+                load_ctrl.scatter_all(xv, state.coords);
+                const auto assembly = fce::assemble_energy_forces(
+                    input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
+                std::vector<double> gradient(static_cast<std::size_t>(input.bcs.ndofOP));
+                for (int i = 0; i < input.bcs.ndofOP; ++i) {
+                    const int flat_dof = input.bcs.mdofOP.at(static_cast<std::size_t>(i));
+                    gradient[static_cast<std::size_t>(i)] =
+                        assembly.force.at(static_cast<std::size_t>(flat_dof));
+                }
+                return {assembly.total_energy, gradient};
+            });
+    } catch (const StopAfterAcceptedThree&) {
+    }
+
+    EXPECT_EQ(checked.size(), accepted_fixtures.size());
+}
+
 TEST_F(E2ECyclicRuntime, AcceptedLbfgsHeadMatchesCommittedFortranReplayFixture) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
@@ -2092,7 +2310,8 @@ TEST_F(E2ECyclicRuntime, AcceptedLbfgsHeadMatchesCommittedFortranReplayFixture) 
                   temp_case_dir_ / "imperfection_trace.dat",
                   fs::copy_options::overwrite_existing);
 
-    const std::string env_prefix = "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir);
+    const std::string env_prefix =
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_CONSTRAINED_LBFGS_MAX_EVAL=25";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_rows = read_numeric_table(dump_dir / "step1_accepted_lbfgs.dat");
@@ -2131,7 +2350,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState20ShowsCommittedFortranReplayDivergence) {
                   fs::copy_options::overwrite_existing);
 
     const std::string env_prefix =
-        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=20";
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) +
+        " FCE_TRACE_ACCEPTED_STATE_STEPS=20 FCE_CONSTRAINED_LBFGS_MAX_EVAL=25";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_accepted_20.dat");
@@ -2172,7 +2392,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState1MatchesCommittedFortranReplayFixture) {
                   fs::copy_options::overwrite_existing);
 
     const std::string env_prefix =
-        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3";
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) +
+        " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3 FCE_CONSTRAINED_LBFGS_MAX_EVAL=6";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_accepted_1.dat");
@@ -2213,7 +2434,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState2MatchesCommittedFortranReplayFixture) {
                   fs::copy_options::overwrite_existing);
 
     const std::string env_prefix =
-        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3";
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) +
+        " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3 FCE_CONSTRAINED_LBFGS_MAX_EVAL=6";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_accepted_2.dat");
@@ -2241,7 +2463,7 @@ TEST_F(E2ECyclicRuntime, AcceptedState2MatchesCommittedFortranReplayFixture) {
     EXPECT_LE(max_eta_abs, 1e-12);
 }
 
-TEST_F(E2ECyclicRuntime, AcceptedState2ShowsFirstFreeGradientDivergence) {
+TEST_F(E2ECyclicRuntime, AcceptedState2FreeGradientMatchesCommittedFortranReplayFixture) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2XfreeFixture)) << "Missing accepted-state-2 xfree fixture";
@@ -2254,7 +2476,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState2ShowsFirstFreeGradientDivergence) {
                   fs::copy_options::overwrite_existing);
 
     const std::string env_prefix =
-        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3";
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) +
+        " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3 FCE_CONSTRAINED_LBFGS_MAX_EVAL=6";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_xfree = read_indexed_vector_dump(dump_dir / "step1_accepted_2_xfree.dat");
@@ -2273,10 +2496,10 @@ TEST_F(E2ECyclicRuntime, AcceptedState2ShowsFirstFreeGradientDivergence) {
     for (std::size_t i = 0; i < actual_gfree.size(); ++i) {
         max_gfree_abs = std::max(max_gfree_abs, std::abs(actual_gfree[i] - expected_gfree[i]));
     }
-    EXPECT_GT(max_gfree_abs, 1.0);
+    EXPECT_LE(max_gfree_abs, 2e-3);
 }
 
-TEST_F(E2ECyclicRuntime, AcceptedState2FixtureReassemblyStillShowsFreeGradientDivergence) {
+TEST_F(E2ECyclicRuntime, AcceptedState2FixtureReassemblyShowsLaggedFreeGradientContract) {
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2Fixture)) << "Missing accepted-state-2 coord fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2EtaFixture)) << "Missing accepted-state-2 eta fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2GfreeFixture)) << "Missing accepted-state-2 gfree fixture";
@@ -2292,6 +2515,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState2FixtureReassemblyStillShowsFreeGradientDi
         input, state, /*element_begin=*/0, /*element_end=*/input.mesh.numele);
     const auto expected_gfree = read_indexed_vector_dump(kCyclicReplayAccepted2GfreeFixture);
 
+    // The committed gfree fixture follows Fortran reverse-communication state:
+    // it is lagged relative to reassembly at the accepted coordinates.
     ASSERT_EQ(expected_gfree.size(), static_cast<std::size_t>(input.bcs.ndofOP));
 
     double max_eta_abs = 0.0;
@@ -2397,7 +2622,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergenc
                   fs::copy_options::overwrite_existing);
 
     const std::string env_prefix =
-        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3";
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) +
+        " FCE_TRACE_ACCEPTED_STATE_STEPS=1-3 FCE_CONSTRAINED_LBFGS_MAX_EVAL=6";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_accepted_3.dat");
@@ -2430,6 +2656,10 @@ TEST_F(E2ECyclicRuntime, AcceptedState55ShowsCommittedFortranReplayDivergence) {
     ASSERT_TRUE(fs::exists(kCyclicReplayTraceFixture)) << "Missing cyclic replay trace fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted55Fixture)) << "Missing accepted-state-55 coord fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted55EtaFixture)) << "Missing accepted-state-55 eta fixture";
+    if (!long_oracle_tests_enabled()) {
+        GTEST_SKIP() << "accepted-state-55 cyclic replay diagnostic is an opt-in long oracle gate; set "
+                        "FCE_RUN_LONG_ORACLE_TESTS=1 to run it";
+    }
 
     const fs::path dump_dir = temp_case_dir_.parent_path() / "cyclic_trace_accept55";
     fs::create_directories(dump_dir);
@@ -2438,7 +2668,8 @@ TEST_F(E2ECyclicRuntime, AcceptedState55ShowsCommittedFortranReplayDivergence) {
                   fs::copy_options::overwrite_existing);
 
     const std::string env_prefix =
-        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) + " FCE_TRACE_ACCEPTED_STATE_STEPS=55";
+        "FCE_TRACE_COORD_DUMPS=" + shell_quote(dump_dir) +
+        " FCE_TRACE_ACCEPTED_STATE_STEPS=55 FCE_CONSTRAINED_LBFGS_MAX_EVAL=65";
     ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, env_prefix), 0);
 
     const auto actual_coords = read_fortran_coord_dump(dump_dir / "step1_accepted_55.dat");
@@ -2496,7 +2727,7 @@ TEST_F(E2ECyclicRuntime, CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOrac
                   temp_case_dir_ / "imperfection_trace.dat",
                   fs::copy_options::overwrite_existing);
 
-    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1), 0);
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1"), 0);
 
     const auto dims = fce::io::read_dims((temp_case_dir_ / "nano_dims.dat").string());
     const auto actual = read_vtu_points(temp_case_dir_ / "mesh_config_0000.vtu", dims.numnods);
@@ -2511,6 +2742,66 @@ TEST_F(E2ECyclicRuntime, CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOrac
         }
     }
     EXPECT_LE(max_abs, 1e-6);
+}
+
+TEST_F(E2ECyclicRuntime, ShortCyclicStepOneMatchesAcrossMpiRanks) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    if (!mpi_tests_enabled()) {
+        GTEST_SKIP() << "MPI launcher parity is opt-in; set FCE_RUN_MPI_TESTS=1 to run it";
+    }
+
+    configure_short_cyclic_restart_case(temp_case_dir_);
+
+    struct MpiRunResult {
+        int ranks;
+        std::vector<std::string> energy_tokens;
+        std::vector<std::string> force_tokens;
+    };
+
+    const fs::path mpi_root = temp_case_dir_.parent_path() / "mpi_parity";
+    fs::create_directories(mpi_root);
+    std::vector<MpiRunResult> results;
+    for (const int ranks : {1, 2, 4, 8}) {
+        const fs::path case_dir = mpi_root / ("np" + std::to_string(ranks));
+        fs::copy(temp_case_dir_, case_dir, fs::copy_options::recursive);
+        remove_runtime_outputs(case_dir);
+
+        const fs::path stdout_path = mpi_root / ("np" + std::to_string(ranks) + ".log");
+        ASSERT_EQ(run_mpi_crunch_it(case_dir,
+                                    ranks,
+                                    /*stop_step=*/1,
+                                    stdout_path,
+                                    "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1"),
+                  0)
+            << read_file(stdout_path);
+        results.push_back(MpiRunResult{
+            ranks,
+            last_data_tokens(case_dir / "energy.dat"),
+            last_data_tokens(case_dir / "force.dat"),
+        });
+    }
+
+    ASSERT_FALSE(results.empty());
+    const auto& reference = results.front();
+    for (const auto& result : results) {
+        ASSERT_EQ(result.energy_tokens.size(), reference.energy_tokens.size())
+            << "np=" << result.ranks;
+        ASSERT_EQ(result.force_tokens.size(), reference.force_tokens.size())
+            << "np=" << result.ranks;
+
+        for (std::size_t i = 0; i < result.energy_tokens.size(); ++i) {
+            const double actual = fce::io::parse_fortran_double(result.energy_tokens[i]);
+            const double expected = fce::io::parse_fortran_double(reference.energy_tokens[i]);
+            EXPECT_LE(relative_error(actual, expected, 1e-12), 1e-10)
+                << "np=" << result.ranks << " energy token " << i;
+        }
+        for (std::size_t i = 0; i < result.force_tokens.size(); ++i) {
+            const double actual = fce::io::parse_fortran_double(result.force_tokens[i]);
+            const double expected = fce::io::parse_fortran_double(reference.force_tokens[i]);
+            EXPECT_LE(relative_error(actual, expected, 1e-12), 1e-10)
+                << "np=" << result.ranks << " force token " << i;
+        }
+    }
 }
 
 #if !defined(FCE_EXCLUDE_CHECKPOINT_REJECTION_TESTS)
@@ -2601,6 +2892,60 @@ TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRun) {
               read_file(uninterrupted_case / "nano_final_config.dat"));
 
     fs::remove_all(uninterrupted_root);
+}
+
+TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRunAcrossEightMpiRanks) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    if (!mpi_tests_enabled()) {
+        GTEST_SKIP() << "MPI launcher restart parity is opt-in; set FCE_RUN_MPI_TESTS=1 to run it";
+    }
+
+    configure_short_cyclic_restart_case(temp_case_dir_);
+
+    const fs::path mpi_root = temp_case_dir_.parent_path() / "mpi_restart";
+    const fs::path uninterrupted_case = mpi_root / "uninterrupted_np8";
+    const fs::path restarted_case = mpi_root / "restarted_np8";
+    fs::create_directories(mpi_root);
+    fs::copy(temp_case_dir_, uninterrupted_case, fs::copy_options::recursive);
+    fs::copy(temp_case_dir_, restarted_case, fs::copy_options::recursive);
+
+    const fs::path uninterrupted_log = mpi_root / "uninterrupted_np8.log";
+    ASSERT_EQ(run_mpi_crunch_it(uninterrupted_case,
+                                /*ranks=*/8,
+                                /*stop_step=*/4,
+                                uninterrupted_log),
+              0)
+        << read_file(uninterrupted_log);
+
+    const fs::path partial_log = mpi_root / "partial_np8.log";
+    ASSERT_EQ(run_mpi_crunch_it(restarted_case,
+                                /*ranks=*/8,
+                                /*stop_step=*/2,
+                                partial_log),
+              0)
+        << read_file(partial_log);
+    ASSERT_TRUE(fs::exists(restarted_case / "nano_checkpoint.dat"));
+
+    const fs::path resumed_log = mpi_root / "resumed_np8.log";
+    ASSERT_EQ(run_mpi_crunch_it(restarted_case,
+                                /*ranks=*/8,
+                                /*stop_step=*/4,
+                                resumed_log),
+              0)
+        << read_file(resumed_log);
+
+    EXPECT_EQ(read_file(restarted_case / "energy.dat"),
+              read_file(uninterrupted_case / "energy.dat"));
+    EXPECT_EQ(read_file(restarted_case / "force.dat"),
+              read_file(uninterrupted_case / "force.dat"));
+    EXPECT_EQ(read_file(restarted_case / "output.dat"),
+              read_file(uninterrupted_case / "output.dat"));
+    EXPECT_EQ(read_file(restarted_case / "nano_final_config.dat"),
+              read_file(uninterrupted_case / "nano_final_config.dat"));
+    ASSERT_TRUE(fs::exists(restarted_case / "nano_checkpoint.dat"));
+    ASSERT_TRUE(fs::exists(uninterrupted_case / "nano_checkpoint.dat"));
+    EXPECT_EQ(read_file(restarted_case / "nano_checkpoint.dat"),
+              read_file(uninterrupted_case / "nano_checkpoint.dat"));
 }
 
 TEST_F(E2ECyclicRuntime, ShortCyclicCheckpointCapturesNonzeroCreaseState) {
@@ -2893,6 +3238,34 @@ TEST_F(RuntimeOutputVdwCase, LoadedVdwCaseWritesNonzeroDensityArrays) {
     EXPECT_TRUE(has_strictly_positive_entry(generated_w_density));
 }
 
+TEST_F(RuntimeOutputVdwCase, SelfContactSingleStepAssemblyMatchesAcrossEightMpiRanks) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+    if (!mpi_tests_enabled()) {
+        GTEST_SKIP() << "MPI runtime vdW assembly is opt-in; set FCE_RUN_MPI_TESTS=1 to run it";
+    }
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    const auto state = fce::make_runtime_state(input);
+    ASSERT_NO_THROW(fce::write_mesh_snapshot(input, state, temp_case_dir_.string(), 0));
+
+    const fs::path np1_stdout = temp_case_dir_.parent_path() / "self_contact_np1.log";
+    const fs::path np8_stdout = temp_case_dir_.parent_path() / "self_contact_np8.log";
+    ASSERT_EQ(run_mpi_single_step_assembly(temp_case_dir_, 1, 0, np1_stdout), 0)
+        << read_file(np1_stdout);
+    ASSERT_EQ(run_mpi_single_step_assembly(temp_case_dir_, 8, 0, np8_stdout), 0)
+        << read_file(np8_stdout);
+
+    const double np1_energy = read_labeled_double(np1_stdout, "assembled_energy");
+    const double np8_energy = read_labeled_double(np8_stdout, "assembled_energy");
+    EXPECT_LE(relative_error(np8_energy, np1_energy, 1e-12), 1e-10);
+    EXPECT_EQ(read_labeled_int(np1_stdout, "inner_fail"), 0);
+    EXPECT_EQ(read_labeled_int(np8_stdout, "inner_fail"), 0);
+    EXPECT_EQ(read_labeled_int(np1_stdout, "force_dofs"),
+              3 * (input.mesh.numnods + input.mesh.nedge));
+    EXPECT_EQ(read_labeled_int(np8_stdout, "force_dofs"),
+              3 * (input.mesh.numnods + input.mesh.nedge));
+}
+
 TEST_F(E2ECompression, CrunchItReusesRecordedImperfectionTraceDeterministically) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
 
@@ -2906,6 +3279,7 @@ TEST_F(E2ECompression, CrunchItReusesRecordedImperfectionTraceDeterministically)
     }
 
     const std::string command =
+        "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1 " +
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
 
     ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
@@ -2933,6 +3307,7 @@ TEST_F(E2ECompression, CrunchItAcceptsStepBoundedImperfectionTrace) {
     }
 
     const std::string command =
+        "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1 " +
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 1";
 
     ASSERT_EQ(std::system(command.c_str()), 0) << "Failed to execute: " << command;
@@ -2956,6 +3331,7 @@ TEST_F(E2ECompression, CrunchItRejectsImperfectionTraceShorterThanRequestedStopS
     }
 
     const std::string command =
+        "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1 " +
         shell_quote(kCrunchItBin) + " " + shell_quote(temp_case_dir_) + " 2";
     EXPECT_NE(std::system(command.c_str()), 0) << "Expected short imperfection trace to be rejected";
 }

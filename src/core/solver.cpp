@@ -23,6 +23,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fce {
@@ -58,6 +59,19 @@ std::string trace_stop_stage() {
         return {};
     }
     return std::string(raw);
+}
+
+int constrained_lbfgs_max_eval() {
+    const char* raw = std::getenv("FCE_CONSTRAINED_LBFGS_MAX_EVAL");
+    if (raw == nullptr || *raw == '\0') {
+        return 20000;
+    }
+    char* end = nullptr;
+    const long parsed = std::strtol(raw, &end, 10);
+    if (end == raw || *end != '\0' || parsed <= 0 || parsed > 20000) {
+        return 20000;
+    }
+    return static_cast<int>(parsed);
 }
 
 std::set<int> accepted_state_dump_steps() {
@@ -476,13 +490,11 @@ double compute_xnorm0(const Coords& coords) {
 
 // ─── energy components from AssemblyResult ────────────────────────────────────
 // The Fortran E_out(4) = [E_total, E_internal, E_vdw, E_external].
-// Currently AssemblyResult only has total_energy. We map it to E_total; the
-// sub-components are not decomposed in the current C++ assembly (VdW not active).
 EnergyComponents to_energy_components(const AssemblyResult& res) {
     EnergyComponents e;
-    e.E_total    = res.reduced_energy;
-    e.E_internal = res.reduced_energy;  // no vdw/external separation yet
-    e.E_vdw      = 0.0;
+    e.E_total    = res.reduced_energy + res.vdw_reduced_energy;
+    e.E_internal = res.reduced_energy;
+    e.E_vdw      = res.vdw_reduced_energy;
     e.E_external = 0.0;
     return e;
 }
@@ -716,9 +728,7 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
         return {res.total_energy, extract_free_gradient(res, bcs)};
     };
 
-    const bool stop_on_first_trial =
-        (bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31);
-    int flag = solver.minimize(x_free, xnorm0, stop_on_first_trial, callback);
+    int flag = solver.minimize(x_free, xnorm0, /*stop_on_first_trial=*/false, callback);
 
     // Broadcast and scatter final state.
     double gnorm = solver.gnorm();
@@ -761,12 +771,14 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
     // Extract free DOFs.
     std::vector<double> x_free = load_ctrl.to_free(state.coords);
 
-    LbfgsSolver solver(10, eps, 1.0e-12, 20000,
+    LbfgsSolver solver(10, eps, 1.0e-12, constrained_lbfgs_max_eval(),
                        mpi.is_root() && lbfgs_monitor_enabled());
 
     EnergyComponents final_E{};
     AssemblyResult final_asm{};
     bool first_eval_dumped = false;
+    bool have_lagged_trace_gradient = false;
+    std::vector<double> lagged_trace_gradient;
     int eval_trace_index = 0;
     write_eval_trace_header_if_enabled(trace_iload, mpi);
     write_lbfgs_step_trace_header_if_enabled(trace_iload, mpi);
@@ -794,11 +806,15 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
                                              final_E,
                                              critc,
                                              mpi);
+        const auto& traced_gradient =
+            have_lagged_trace_gradient ? lagged_trace_gradient : g_trial;
         write_selected_free_state_if_enabled(trace_iload,
                                              iter,
                                              x_trial,
-                                             g_trial,
+                                             traced_gradient,
                                              mpi);
+        lagged_trace_gradient = g_trial;
+        have_lagged_trace_gradient = true;
     });
 
     auto callback = [&](const std::vector<double>& xv)
@@ -846,8 +862,15 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
                 first_eval_dumped = true;
             }
 
-            // Gradient at free DOFs.
-            return {res.total_energy, extract_free_gradient(res, bcs)};
+            // Gradient at free DOFs. The accepted-state trace mirrors the
+            // Fortran reverse-communication dump, where X is accepted before
+            // the G argument is refreshed for that accepted state.
+            auto g_free = extract_free_gradient(res, bcs);
+            if (!have_lagged_trace_gradient) {
+                lagged_trace_gradient = g_free;
+                have_lagged_trace_gradient = true;
+            }
+            return {res.total_energy, std::move(g_free)};
         } catch (const std::exception& ex) {
             throw std::runtime_error("minimize_constrained callback failed: " +
                                      std::string(ex.what()));

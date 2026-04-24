@@ -47,6 +47,7 @@ struct CheckpointResumeResult {
 struct AssemblyResult {
     double total_energy{0.0};
     double reduced_energy{0.0};
+    double vdw_reduced_energy{0.0};
     std::vector<double> force{};
     int inner_fail{0};
     EtaField eta_updates{};
@@ -64,12 +65,14 @@ Coords read_vtu_points(const std::string& path, int expected_points);
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       RuntimeState& state,
                                       int element_begin,
-                                      int element_end);
+                                      int element_end,
+                                      int element_stride = 1);
 
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       const Coords& coords,
                                       int element_begin,
-                                      int element_end);
+                                      int element_end,
+                                      int element_stride = 1);
 
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       RuntimeState& state,

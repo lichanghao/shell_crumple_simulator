@@ -2,10 +2,12 @@
 
 #include "fce/ghost_nodes.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <unordered_set>
 #include <sstream>
 #include <stdexcept>
@@ -23,6 +25,25 @@ EtaField zero_eta_field(const int numele, const int ngauss) {
     return EtaField(static_cast<std::size_t>(numele),
                     std::vector<Vec2>(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0}));
 }
+
+struct VdwPotential {
+    double energy{0.0};
+    double derivative{0.0};
+};
+
+struct VdwAssembly {
+    double total_energy{0.0};
+    double reduced_energy{0.0};
+    std::vector<double> force{};
+};
+
+struct VdwSpatialBins {
+    std::array<int, 3> count{1, 1, 1};
+    Vec3 min{};
+    Vec3 width{1.0, 1.0, 1.0};
+    std::vector<std::vector<int>> bins{};
+    std::vector<std::array<int, 3>> point_bin{};
+};
 
 FlatCoords flatten_coords(const Coords& coords) {
     FlatCoords flat;
@@ -56,6 +77,287 @@ NeighborCoords12 gather_neighbor_patch(const Mesh& mesh,
     }
 
     return xneigh;
+}
+
+std::vector<Vec3> locate_vdw_gauss_points(const Mesh& mesh,
+                                          const VdwData& vdw,
+                                          const FlatCoords& coords_with_ghosts) {
+    if (vdw.nvdw != 1) {
+        return {};
+    }
+    if (vdw.ngauss_vdw <= 0) {
+        throw std::runtime_error("vdW runtime requires positive ngauss_vdw");
+    }
+    if (static_cast<int>(vdw.shapef.size()) < vdw.ngauss_vdw) {
+        throw std::runtime_error("vdW runtime shapef size does not match ngauss_vdw");
+    }
+
+    std::vector<Vec3> x(static_cast<std::size_t>(mesh.numele * vdw.ngauss_vdw),
+                        Vec3{0.0, 0.0, 0.0});
+    for (int ielem = 0; ielem < mesh.numele; ++ielem) {
+        const auto& connect = mesh.connect.at(static_cast<std::size_t>(ielem));
+        for (int ig = 0; ig < vdw.ngauss_vdw; ++ig) {
+            const int idx = ielem * vdw.ngauss_vdw + ig;
+            for (int inode = 0; inode < 12; ++inode) {
+                const int node_index = connect.neigh_vert[inode];
+                const std::size_t base = static_cast<std::size_t>(3 * node_index);
+                const double shape = vdw.shapef.at(static_cast<std::size_t>(ig))[inode];
+                for (int axis = 0; axis < 3; ++axis) {
+                    x.at(static_cast<std::size_t>(idx))[axis] +=
+                        shape * coords_with_ghosts.at(base + static_cast<std::size_t>(axis));
+                }
+            }
+        }
+    }
+    return x;
+}
+
+VdwPotential evaluate_vdw_cut_potential(const VdwData& vdw, const double r) {
+    if (r >= vdw.r_cut) {
+        return {};
+    }
+    const double a1 = vdw.sig / r;
+    const double a6 = std::pow(a1, 6);
+    const double a12 = a6 * a6;
+    const double y06 = std::pow(vdw.y0, 6);
+    VdwPotential out;
+    out.energy = (0.5 * y06 * a12 - a6) * vdw.a / std::pow(vdw.sig, 6);
+    out.derivative =
+        (a1 * 6.0 / vdw.sig * (-y06 * a12 + a6)) * vdw.a / std::pow(vdw.sig, 6);
+    out.energy = out.energy - vdw.Vcut[1] * (r - vdw.r_cut) - vdw.Vcut[0];
+    out.derivative -= vdw.Vcut[1];
+    return out;
+}
+
+int tube_for_gauss_index(const VdwData& vdw, const int gp_index) {
+    for (int tube = 0; tube < static_cast<int>(vdw.tub_partitions.size()); ++tube) {
+        const auto [begin, end] = vdw.tub_partitions.at(static_cast<std::size_t>(tube));
+        if (gp_index >= begin && gp_index < end) {
+            return tube;
+        }
+    }
+    return -1;
+}
+
+bool vdw_prelisted_neighbor_excludes(const VdwData& vdw, const int i, const int j) {
+    if (i < 0 || i >= static_cast<int>(vdw.near.size())) {
+        return false;
+    }
+    const auto& row = vdw.near.at(static_cast<std::size_t>(i));
+    if (row.empty()) {
+        return false;
+    }
+    const int count = std::max(0, std::min(row[0], static_cast<int>(row.size()) - 1));
+    for (int k = 1; k <= count; ++k) {
+        const int entry = row.at(static_cast<std::size_t>(k));
+        if (entry == j || entry - 1 == j) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool vdw_pair_allowed(const Mesh& mesh, const VdwData& vdw, const int i, const int j) {
+    const int ielem = i / vdw.ngauss_vdw;
+    const int jelem = j / vdw.ngauss_vdw;
+    if (vdw.nneigh > 0) {
+        return !vdw_prelisted_neighbor_excludes(vdw, i, j);
+    }
+    if (vdw.nneigh == -2) {
+        if (ielem == jelem) {
+            return false;
+        }
+        const auto& elem = mesh.connect.at(static_cast<std::size_t>(ielem));
+        for (int k = 0; k < 12; ++k) {
+            if (elem.neigh_elem[k] == jelem + 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (vdw.nneigh == -1) {
+        const int my_tube = tube_for_gauss_index(vdw, i);
+        const int other_tube = tube_for_gauss_index(vdw, j);
+        if (my_tube < 0 || other_tube < 0) {
+            throw std::runtime_error("vdW runtime could not map gauss point to tube partition");
+        }
+        return other_tube == my_tube + 1;
+    }
+    return true;
+}
+
+int flatten_vdw_bin_index(const VdwSpatialBins& bins, const int ix, const int iy, const int iz) {
+    return (ix * bins.count[1] + iy) * bins.count[2] + iz;
+}
+
+int locate_vdw_bin_axis(const double x, const double xmin, const double width, const int count) {
+    if (count <= 1) {
+        return 0;
+    }
+    int idx = static_cast<int>((x - xmin) / width);
+    if (idx < 0) {
+        return 0;
+    }
+    if (idx >= count) {
+        return count - 1;
+    }
+    return idx;
+}
+
+VdwSpatialBins build_vdw_spatial_bins(const std::vector<Vec3>& gp, const double cutoff) {
+    if (gp.empty()) {
+        return {};
+    }
+    if (cutoff <= 0.0) {
+        throw std::runtime_error("vdW runtime requires positive cutoff radius");
+    }
+
+    VdwSpatialBins bins;
+    bins.min = gp.front();
+    Vec3 max = gp.front();
+    for (const auto& x : gp) {
+        for (int axis = 0; axis < 3; ++axis) {
+            bins.min[axis] = std::min(bins.min[axis], x[axis]);
+            max[axis] = std::max(max[axis], x[axis]);
+        }
+    }
+
+    int nbins = 1;
+    for (int axis = 0; axis < 3; ++axis) {
+        const double range = max[axis] - bins.min[axis];
+        bins.count[axis] = std::max(1, static_cast<int>(range / cutoff));
+        bins.width[axis] = bins.count[axis] > 0 ? std::max(range / bins.count[axis], cutoff) : cutoff;
+        nbins *= bins.count[axis];
+    }
+    bins.bins.assign(static_cast<std::size_t>(nbins), {});
+    bins.point_bin.assign(gp.size(), std::array<int, 3>{0, 0, 0});
+
+    for (int i = 0; i < static_cast<int>(gp.size()); ++i) {
+        auto& point_bin = bins.point_bin.at(static_cast<std::size_t>(i));
+        for (int axis = 0; axis < 3; ++axis) {
+            point_bin[axis] = locate_vdw_bin_axis(
+                gp.at(static_cast<std::size_t>(i))[axis],
+                bins.min[axis],
+                bins.width[axis],
+                bins.count[axis]);
+        }
+        bins.bins.at(static_cast<std::size_t>(
+            flatten_vdw_bin_index(bins, point_bin[0], point_bin[1], point_bin[2]))).push_back(i);
+    }
+
+    return bins;
+}
+
+VdwAssembly assemble_vdw_runtime(const SimulatorInput& input,
+                                 const FlatCoords& coords_with_ghosts,
+                                 const int element_begin,
+                                 const int element_end,
+                                 const int element_stride,
+                                 const std::unordered_set<int>& ghost_elements) {
+    VdwAssembly result;
+    result.force.assign(static_cast<std::size_t>(3 * (input.mesh.numnods + input.mesh.nedge)), 0.0);
+    if (input.vdw.nvdw != 1) {
+        return result;
+    }
+    if (input.vdw.weight.size() < static_cast<std::size_t>(input.vdw.ngauss_vdw)) {
+        throw std::runtime_error("vdW runtime weight size does not match ngauss_vdw");
+    }
+    if (input.general.mat.s0 == 0.0) {
+        throw std::runtime_error("vdW runtime requires nonzero material s0");
+    }
+
+    const auto gp = locate_vdw_gauss_points(input.mesh, input.vdw, coords_with_ghosts);
+    const int ng_tot = static_cast<int>(gp.size());
+    const bool has_rho = static_cast<int>(input.vdw.rho.size()) >= ng_tot;
+    const auto bins = build_vdw_spatial_bins(gp, input.vdw.r_cut);
+
+    for (int ielem = element_begin; ielem < element_end; ielem += element_stride) {
+        const auto& elem_i = input.mesh.connect.at(static_cast<std::size_t>(ielem));
+        double elem_vdw_energy = 0.0;
+        for (int ig = 0; ig < input.vdw.ngauss_vdw; ++ig) {
+            const int i = ielem * input.vdw.ngauss_vdw + ig;
+            const auto& point_bin = bins.point_bin.at(static_cast<std::size_t>(i));
+            for (int ix = std::max(0, point_bin[0] - 1);
+                 ix <= std::min(bins.count[0] - 1, point_bin[0] + 1);
+                 ++ix) {
+            for (int iy = std::max(0, point_bin[1] - 1);
+                 iy <= std::min(bins.count[1] - 1, point_bin[1] + 1);
+                 ++iy) {
+            for (int iz = std::max(0, point_bin[2] - 1);
+                 iz <= std::min(bins.count[2] - 1, point_bin[2] + 1);
+                 ++iz) {
+            const auto& candidates = bins.bins.at(
+                static_cast<std::size_t>(flatten_vdw_bin_index(bins, ix, iy, iz)));
+            for (const int j : candidates) {
+                if (j <= i) {
+                    continue;
+                }
+                if (!vdw_pair_allowed(input.mesh, input.vdw, i, j)) {
+                    continue;
+                }
+                Vec3 vec{
+                    gp.at(static_cast<std::size_t>(i))[0] - gp.at(static_cast<std::size_t>(j))[0],
+                    gp.at(static_cast<std::size_t>(i))[1] - gp.at(static_cast<std::size_t>(j))[1],
+                    gp.at(static_cast<std::size_t>(i))[2] - gp.at(static_cast<std::size_t>(j))[2],
+                };
+                const double dist =
+                    std::sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+                if (dist >= input.vdw.r_cut) {
+                    continue;
+                }
+                if (dist <= std::numeric_limits<double>::epsilon()) {
+                    throw std::runtime_error("vdW runtime encountered coincident gauss points");
+                }
+                const int jelem = j / input.vdw.ngauss_vdw;
+                const int jg = j - jelem * input.vdw.ngauss_vdw;
+                const auto& elem_j = input.mesh.connect.at(static_cast<std::size_t>(jelem));
+
+                double weight = input.vdw.weight.at(static_cast<std::size_t>(ig)) *
+                                input.vdw.weight.at(static_cast<std::size_t>(jg)) *
+                                input.ref_config.at(static_cast<std::size_t>(ielem)).J0 *
+                                input.ref_config.at(static_cast<std::size_t>(jelem)).J0;
+                if (has_rho) {
+                    weight *= input.vdw.rho.at(static_cast<std::size_t>(i)) *
+                              input.vdw.rho.at(static_cast<std::size_t>(j)) *
+                              (input.general.mat.s0 * input.general.mat.s0 / 4.0);
+                }
+
+                const auto potential = evaluate_vdw_cut_potential(input.vdw, dist);
+                elem_vdw_energy += potential.energy * weight;
+                const double force_scale =
+                    potential.derivative / dist * weight /
+                    (input.general.mat.s0 * input.general.mat.s0);
+                for (int axis = 0; axis < 3; ++axis) {
+                    vec[axis] *= force_scale;
+                }
+
+                for (int inode = 0; inode < 12; ++inode) {
+                    const double shape_i = input.vdw.shapef.at(static_cast<std::size_t>(ig))[inode];
+                    const double shape_j = input.vdw.shapef.at(static_cast<std::size_t>(jg))[inode];
+                    const std::size_t base_i =
+                        static_cast<std::size_t>(3 * elem_i.neigh_vert[inode]);
+                    const std::size_t base_j =
+                        static_cast<std::size_t>(3 * elem_j.neigh_vert[inode]);
+                    for (int axis = 0; axis < 3; ++axis) {
+                        result.force.at(base_i + static_cast<std::size_t>(axis)) +=
+                            vec[axis] * shape_i;
+                        result.force.at(base_j + static_cast<std::size_t>(axis)) -=
+                            vec[axis] * shape_j;
+                    }
+                }
+            }
+            }
+            }
+            }
+        }
+        elem_vdw_energy /= input.general.mat.s0 * input.general.mat.s0;
+        result.total_energy += elem_vdw_energy;
+        if (ghost_elements.find(ielem) == ghost_elements.end()) {
+            result.reduced_energy += elem_vdw_energy;
+        }
+    }
+
+    return result;
 }
 
 std::string format_patch_coords(const NeighborCoords12& xneigh) {
@@ -281,7 +583,8 @@ Coords read_vtu_points(const std::string& path, const int expected_points) {
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       RuntimeState& state,
                                       const int element_begin,
-                                      const int element_end) {
+                                      const int element_end,
+                                      const int element_stride) {
     if (static_cast<int>(state.coords.size()) != input.mesh.numnods) {
         throw std::runtime_error("coordinate field size does not match mesh.numnods");
     }
@@ -290,6 +593,9 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     }
     if (element_begin < 0 || element_end < element_begin || element_end > input.mesh.numele) {
         throw std::out_of_range("invalid assembly element range");
+    }
+    if (element_stride <= 0) {
+        throw std::out_of_range("invalid assembly element stride");
     }
 
     FlatCoords coords_with_ghosts = flatten_coords(state.coords);
@@ -301,11 +607,11 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     result.eta_updates = zero_eta_field(input.mesh.numele, input.dims.ngauss);
     const std::unordered_set<int> ghost_elements(input.mesh.elem_ghost.begin(),
                                                  input.mesh.elem_ghost.end());
-    std::vector<long double> force_accum(result.force.size(), 0.0L);
-    long double total_energy_accum = 0.0L;
-    long double reduced_energy_accum = 0.0L;
+    std::vector<double> force_accum(result.force.size(), 0.0);
+    double total_energy_accum = 0.0;
+    double reduced_energy_accum = 0.0;
 
-    for (int ielem = element_begin; ielem < element_end; ++ielem) {
+    for (int ielem = element_begin; ielem < element_end; ielem += element_stride) {
         const auto xneigh = gather_neighbor_patch(input.mesh, coords_with_ghosts, ielem);
         const auto& eta0 = state.eta.at(static_cast<std::size_t>(ielem));
         std::vector<Voigt3> reference_curvature(static_cast<std::size_t>(input.dims.ngauss),
@@ -342,9 +648,9 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
         result.eta_updates.at(static_cast<std::size_t>(ielem)) = elem.eta;
 
         const double scale = input.ref_config.at(static_cast<std::size_t>(ielem)).J0 / 2.0;
-        total_energy_accum += static_cast<long double>(elem.W_elem) * static_cast<long double>(scale);
+        total_energy_accum += elem.W_elem * scale;
         if (ghost_elements.find(ielem) == ghost_elements.end()) {
-            reduced_energy_accum += static_cast<long double>(elem.W_elem) * static_cast<long double>(scale);
+            reduced_energy_accum += elem.W_elem * scale;
         }
         result.inner_fail += elem.inner_fail;
 
@@ -353,16 +659,27 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
             const int node_index = connect.neigh_vert[inode];
             const std::size_t base = static_cast<std::size_t>(3 * node_index);
             for (int axis = 0; axis < 3; ++axis) {
-                force_accum[base + static_cast<std::size_t>(axis)] +=
-                    static_cast<long double>(elem.f_elem[inode][axis]) * static_cast<long double>(scale);
+                force_accum[base + static_cast<std::size_t>(axis)] += elem.f_elem[inode][axis] * scale;
             }
         }
     }
 
-    result.total_energy = static_cast<double>(total_energy_accum);
-    result.reduced_energy = static_cast<double>(reduced_energy_accum);
+    const auto vdw = assemble_vdw_runtime(input,
+                                          coords_with_ghosts,
+                                          element_begin,
+                                          element_end,
+                                          element_stride,
+                                          ghost_elements);
+    total_energy_accum += vdw.total_energy;
+    for (std::size_t i = 0; i < force_accum.size(); ++i) {
+        force_accum[i] += vdw.force[i];
+    }
+
+    result.total_energy = total_energy_accum;
+    result.reduced_energy = reduced_energy_accum;
+    result.vdw_reduced_energy = vdw.reduced_energy;
     for (std::size_t i = 0; i < result.force.size(); ++i) {
-        result.force[i] = static_cast<double>(force_accum[i]);
+        result.force[i] = force_accum[i];
     }
 
     fold_ghost_forces(result.force, input.mesh);
@@ -373,20 +690,25 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       const Coords& coords,
                                       const int element_begin,
-                                      const int element_end) {
+                                      const int element_end,
+                                      const int element_stride) {
     RuntimeState state = make_runtime_state(input);
     state.coords = coords;
-    return assemble_energy_forces(input, state, element_begin, element_end);
+    return assemble_energy_forces(input, state, element_begin, element_end, element_stride);
 }
 
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       RuntimeState& state,
                                       const MpiEnv& mpi) {
-    const auto owned = element_partition(input.mesh.numele, mpi.size(), mpi.rank());
-    auto local = assemble_energy_forces(input, state, owned.first, owned.second);
+    auto local = assemble_energy_forces(input,
+                                        state,
+                                        mpi.rank(),
+                                        input.mesh.numele,
+                                        mpi.size());
 
     local.total_energy = mpi.allreduce_sum(local.total_energy);
     local.reduced_energy = mpi.allreduce_sum(local.reduced_energy);
+    local.vdw_reduced_energy = mpi.allreduce_sum(local.vdw_reduced_energy);
     mpi.allreduce_sum(local.force);
 
     std::vector<double> fail_count{static_cast<double>(local.inner_fail)};
