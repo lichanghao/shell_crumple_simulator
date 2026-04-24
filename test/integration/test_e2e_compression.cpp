@@ -2774,7 +2774,7 @@ TEST_F(E2ECyclicRuntime, CrunchItPostMinimizeFreeStateMatchesCommittedCyclicOrac
                                std::abs(actual[inode][axis] - oracle[inode][axis]));
         }
     }
-    EXPECT_LE(max_abs, 1e-6);
+    EXPECT_LE(max_abs, 2e-7);
 }
 
 TEST_F(E2ECyclicRuntime, ShortCyclicStepOneMatchesAcrossMpiRanks) {
