@@ -3405,6 +3405,37 @@ TEST_F(RuntimeOutputVdwCase, LoadedVdwCaseWritesNonzeroDensityArrays) {
     EXPECT_TRUE(has_strictly_positive_entry(generated_w_density));
 }
 
+TEST_F(RuntimeOutputVdwCase, CrunchItWritesNonzeroDensityArraysForSelfContactCase) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_FALSE(input.vdw.rho.empty());
+    ASSERT_FALSE(input.vdw.shapef.empty());
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 1, {}, "FCE_CONSTRAINED_LBFGS_MAX_EVAL=1"), 0);
+
+    const fs::path pvd_path = temp_case_dir_ / "mesh_config_series.pvd";
+    const fs::path step0_vtu = temp_case_dir_ / fce::snapshot_filename(0);
+    const fs::path step1_vtu = temp_case_dir_ / fce::snapshot_filename(1);
+    ASSERT_TRUE(fs::exists(pvd_path));
+    ASSERT_TRUE(fs::exists(step0_vtu));
+    ASSERT_TRUE(fs::exists(step1_vtu));
+    expect_xml_loadable({pvd_path, step0_vtu, step1_vtu});
+
+    const auto generated_atomic_density = read_vtu_scalar_array(step1_vtu, "atomic_density");
+    const auto generated_w_density = read_vtu_scalar_array(step1_vtu, "W_density");
+    const auto expected_atomic_density = expected_atomic_density_from_loaded_vdw(input);
+    const auto expected_w_density = expected_w_density_from_loaded_vdw(input);
+
+    ASSERT_EQ(generated_atomic_density.size(), expected_atomic_density.size());
+    ASSERT_EQ(generated_w_density.size(), expected_w_density.size());
+    EXPECT_LE(max_relative_error(generated_atomic_density, expected_atomic_density, 1e-12), 1e-12);
+    EXPECT_LE(max_relative_error(generated_w_density, expected_w_density, 1e-12), 1e-12);
+    EXPECT_TRUE(has_strictly_positive_entry(generated_atomic_density));
+    EXPECT_TRUE(has_strictly_positive_entry(generated_w_density));
+}
+
 TEST_F(RuntimeOutputVdwCase, SelfContactSingleStepAssemblyMatchesAcrossEightMpiRanks) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     if (!mpi_tests_enabled()) {
