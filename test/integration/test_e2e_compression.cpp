@@ -3015,6 +3015,36 @@ TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRun) {
     fs::remove_all(uninterrupted_root);
 }
 
+TEST_F(E2ECyclicRuntime, DeletingCheckpointForcesFreshShortCyclicRun) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    configure_short_cyclic_restart_case(temp_case_dir_);
+
+    const fs::path uninterrupted_root = make_temp_dir();
+    const fs::path uninterrupted_case = uninterrupted_root / "prepro_run";
+    fs::copy(temp_case_dir_, uninterrupted_case, fs::copy_options::recursive);
+
+    ASSERT_EQ(run_crunch_it(uninterrupted_case, 4), 0);
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 2), 0);
+    ASSERT_TRUE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
+    fs::remove(temp_case_dir_ / "nano_checkpoint.dat");
+    ASSERT_FALSE(fs::exists(temp_case_dir_ / "nano_checkpoint.dat"));
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 4), 0);
+
+    EXPECT_EQ(read_file(temp_case_dir_ / "energy.dat"),
+              read_file(uninterrupted_case / "energy.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "force.dat"),
+              read_file(uninterrupted_case / "force.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "output.dat"),
+              read_file(uninterrupted_case / "output.dat"));
+    EXPECT_EQ(read_file(temp_case_dir_ / "nano_final_config.dat"),
+              read_file(uninterrupted_case / "nano_final_config.dat"));
+
+    fs::remove_all(uninterrupted_root);
+}
+
 TEST_F(E2ECyclicRuntime, CrunchItRestartMatchesUninterruptedShortCyclicRunAcrossEightMpiRanks) {
     ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
     if (!mpi_tests_enabled()) {
