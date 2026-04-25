@@ -2694,8 +2694,13 @@ TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergenc
     const auto expected_xfree = read_indexed_vector_dump(kCyclicReplayAccepted3XfreeFixture);
     ASSERT_EQ(actual_xfree.size(), expected_xfree.size());
     double max_xfree_abs = 0.0;
+    std::size_t max_xfree_index = 0;
     for (std::size_t i = 0; i < actual_xfree.size(); ++i) {
-        max_xfree_abs = std::max(max_xfree_abs, std::abs(actual_xfree[i] - expected_xfree[i]));
+        const double diff = std::abs(actual_xfree[i] - expected_xfree[i]);
+        if (diff > max_xfree_abs) {
+            max_xfree_abs = diff;
+            max_xfree_index = i;
+        }
     }
     EXPECT_GT(max_xfree_abs, 1e-6);
 
@@ -2703,10 +2708,19 @@ TEST_F(E2ECyclicRuntime, AcceptedState3ShowsFirstCommittedFortranReplayDivergenc
     const auto expected_gfree = read_indexed_vector_dump(kCyclicReplayAccepted3GfreeFixture);
     ASSERT_EQ(actual_gfree.size(), expected_gfree.size());
     double max_gfree_abs = 0.0;
+    std::size_t max_gfree_index = 0;
     for (std::size_t i = 0; i < actual_gfree.size(); ++i) {
-        max_gfree_abs = std::max(max_gfree_abs, std::abs(actual_gfree[i] - expected_gfree[i]));
+        const double diff = std::abs(actual_gfree[i] - expected_gfree[i]);
+        if (diff > max_gfree_abs) {
+            max_gfree_abs = diff;
+            max_gfree_index = i;
+        }
     }
     EXPECT_GT(max_gfree_abs, 1e-3);
+    EXPECT_EQ(max_xfree_index, max_gfree_index);
+    const auto input = fce::load_simulator_input(temp_case_dir_.string());
+    ASSERT_LT(max_xfree_index, input.bcs.mdofOP.size());
+    EXPECT_EQ(input.bcs.mdofOP.at(max_xfree_index) % 3, 2);
 }
 
 TEST_F(E2ECyclicRuntime, AcceptedState55ShowsCommittedFortranReplayDivergence) {
