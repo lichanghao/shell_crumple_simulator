@@ -3201,6 +3201,22 @@ TEST_F(E2ECyclicRuntime, CrunchItWritesCreaseMapForShortCyclicRun) {
     EXPECT_NE(content.find("Creased elements"), std::string::npos);
 }
 
+TEST_F(E2ECyclicRuntime, CrunchItSkipsCreaseMapWhenCreaseMemoryIsDisabled) {
+    ASSERT_TRUE(fs::exists(kCrunchItBin)) << "Missing crunch_it binary at " << kCrunchItBin;
+
+    configure_short_cyclic_restart_case(temp_case_dir_);
+    auto crease = fce::io::read_crease((temp_case_dir_ / "nano_crease.dat").string(), 0, 0);
+    crease.ncrease = 0;
+    crease.kappa_cr = 0.0;
+    crease.alpha_lock = 0.0;
+    fce::io::write_crease((temp_case_dir_ / "nano_crease.dat").string(), crease, 0, 0);
+    fs::remove(temp_case_dir_ / "crease_map.dat");
+
+    ASSERT_EQ(run_crunch_it(temp_case_dir_, 4), 0);
+
+    EXPECT_FALSE(fs::exists(temp_case_dir_ / "crease_map.dat"));
+}
+
 TEST_F(E2ECyclicRuntime, RuntimeCreaseMapMatchesArchivedCyclicOracleFromArchivedFinalState) {
     const auto input = fce::load_simulator_input(kCyclicCaseDir.string());
     const auto archived_final = fce::io::read_config(
