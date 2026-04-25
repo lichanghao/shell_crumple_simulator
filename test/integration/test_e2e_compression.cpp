@@ -2250,6 +2250,10 @@ TEST_F(E2ECyclicRuntime, ConstrainedReplayFromCommittedPostFreeMatchesAcceptedSt
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted1Fixture)) << "Missing accepted-state-1 fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2Fixture)) << "Missing accepted-state-2 fixture";
     ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3Fixture)) << "Missing accepted-state-3 fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2XfreeFixture)) << "Missing accepted-state-2 xfree fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted2GfreeFixture)) << "Missing accepted-state-2 gfree fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3XfreeFixture)) << "Missing accepted-state-3 xfree fixture";
+    ASSERT_TRUE(fs::exists(kCyclicReplayAccepted3GfreeFixture)) << "Missing accepted-state-3 gfree fixture";
 
     const auto input = fce::load_simulator_input(temp_case_dir_.string());
     auto state = fce::make_runtime_state(input);
@@ -2276,8 +2280,18 @@ TEST_F(E2ECyclicRuntime, ConstrainedReplayFromCommittedPostFreeMatchesAcceptedSt
         {2, kCyclicReplayAccepted2Fixture},
         {3, kCyclicReplayAccepted3Fixture},
     };
+    const std::map<int, fs::path> accepted_xfree_fixtures{
+        {2, kCyclicReplayAccepted2XfreeFixture},
+        {3, kCyclicReplayAccepted3XfreeFixture},
+    };
+    const std::map<int, fs::path> accepted_gfree_fixtures{
+        {2, kCyclicReplayAccepted2GfreeFixture},
+        {3, kCyclicReplayAccepted3GfreeFixture},
+    };
     std::set<int> checked;
     struct StopAfterAcceptedThree : std::exception {};
+    bool have_lagged_gradient = false;
+    std::vector<double> lagged_gradient;
 
     solver.set_accepted_step_observer(
         [&](const int iter,
@@ -2286,7 +2300,7 @@ TEST_F(E2ECyclicRuntime, ConstrainedReplayFromCommittedPostFreeMatchesAcceptedSt
             const double,
             const double,
             const std::vector<double>& x_trial,
-            const std::vector<double>&) {
+            const std::vector<double>& g_trial) {
             const auto fixture_it = accepted_fixtures.find(iter);
             if (fixture_it == accepted_fixtures.end()) {
                 return;
@@ -2303,6 +2317,37 @@ TEST_F(E2ECyclicRuntime, ConstrainedReplayFromCommittedPostFreeMatchesAcceptedSt
                 }
             }
             EXPECT_LE(max_abs, 1e-10) << "accepted state " << iter;
+
+            if (const auto xfree_it = accepted_xfree_fixtures.find(iter);
+                xfree_it != accepted_xfree_fixtures.end()) {
+                const auto expected_xfree = read_indexed_vector_dump(xfree_it->second);
+                ASSERT_EQ(x_trial.size(), expected_xfree.size()) << "accepted xfree " << iter;
+                double max_xfree_abs = 0.0;
+                for (std::size_t i = 0; i < x_trial.size(); ++i) {
+                    max_xfree_abs = std::max(
+                        max_xfree_abs,
+                        std::abs(x_trial[i] - expected_xfree[i]));
+                }
+                EXPECT_LE(max_xfree_abs, 1e-10) << "accepted xfree " << iter;
+            }
+
+            if (const auto gfree_it = accepted_gfree_fixtures.find(iter);
+                gfree_it != accepted_gfree_fixtures.end()) {
+                const auto& gradient_to_compare =
+                    have_lagged_gradient ? lagged_gradient : g_trial;
+                const auto expected_gfree = read_indexed_vector_dump(gfree_it->second);
+                ASSERT_EQ(gradient_to_compare.size(), expected_gfree.size())
+                    << "accepted gfree " << iter;
+                double max_gfree_abs = 0.0;
+                for (std::size_t i = 0; i < gradient_to_compare.size(); ++i) {
+                    max_gfree_abs = std::max(
+                        max_gfree_abs,
+                        std::abs(gradient_to_compare[i] - expected_gfree[i]));
+                }
+                EXPECT_LE(max_gfree_abs, 1e-8) << "accepted gfree " << iter;
+            }
+            lagged_gradient = g_trial;
+            have_lagged_gradient = true;
             checked.insert(iter);
             if (checked.size() == accepted_fixtures.size()) {
                 throw StopAfterAcceptedThree{};
@@ -2323,6 +2368,10 @@ TEST_F(E2ECyclicRuntime, ConstrainedReplayFromCommittedPostFreeMatchesAcceptedSt
                     const int flat_dof = input.bcs.mdofOP.at(static_cast<std::size_t>(i));
                     gradient[static_cast<std::size_t>(i)] =
                         assembly.force.at(static_cast<std::size_t>(flat_dof));
+                }
+                if (!have_lagged_gradient) {
+                    lagged_gradient = gradient;
+                    have_lagged_gradient = true;
                 }
                 return {assembly.total_energy, gradient};
             });
