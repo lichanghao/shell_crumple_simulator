@@ -51,6 +51,19 @@ bool lbfgs_state_trace_enabled() {
              value == "no" || value == "off");
 }
 
+bool lbfgs_accept_trace_enabled() {
+    const char* raw = std::getenv("FCE_LBFGS_ACCEPT_TRACE");
+    if (raw == nullptr) {
+        return false;
+    }
+    std::string value(raw);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return !(value.empty() || value == "0" || value == "false" ||
+             value == "no" || value == "off");
+}
+
 double vec_dot(int n, const double* a, const double* b) {
     double sum = 0.0;
     if (n <= 0) {
@@ -66,11 +79,13 @@ double vec_dot(int n, const double* a, const double* b) {
     }
 
     for (int i = m; i < n; i += 5) {
-        sum += a[i] * b[i]
-             + a[i + 1] * b[i + 1]
-             + a[i + 2] * b[i + 2]
-             + a[i + 3] * b[i + 3]
-             + a[i + 4] * b[i + 4];
+        // Keep the same left-to-right accumulator updates as the reference
+        // BLAS DDOT used by the Fortran build.
+        sum += a[i] * b[i];
+        sum += a[i + 1] * b[i + 1];
+        sum += a[i + 2] * b[i + 2];
+        sum += a[i + 3] * b[i + 3];
+        sum += a[i + 4] * b[i + 4];
     }
     return sum;
 }
@@ -96,6 +111,30 @@ void vec_axpy(int n, double alpha, const double* x, double* y) {
     }
 }
 
+void print_accept_trace(const int iter,
+                        const int nfun,
+                        const double f,
+                        const double critc,
+                        const double raw_gnorm,
+                        const double ddx,
+                        const double xnorm0,
+                        const double stp) {
+    if (!lbfgs_accept_trace_enabled()) {
+        return;
+    }
+    std::cout << "ACCEPT "
+              << std::setw(6) << iter
+              << std::setw(6) << nfun
+              << " "
+              << std::uppercase << std::scientific << std::setprecision(16)
+              << f << " "
+              << critc << " "
+              << raw_gnorm << " "
+              << ddx << " "
+              << xnorm0 << " "
+              << stp << "\n";
+}
+
 }  // namespace
 
 // ─── LbfgsSolver ─────────────────────────────────────────────────────────────
@@ -113,6 +152,7 @@ void LbfgsSolver::reset() {
     raw_gnorm_ = 1.0;
     crit_conv_ = 1.0;
     stp_ = 1.0;
+    ddx_ = 0.0;
     nfev_ls_ = 0;
     infoc_ = 1;
     deriv_trace_eval_ = 0;
@@ -262,7 +302,7 @@ int LbfgsSolver::lbfgs_step(int n,
     const int    maxfev = 100;
 
     double stp = stp_;
-    double ddx = 0.0;
+    double ddx = ddx_;
 
     // ── FIRST ENTRY (IFLAG==0 in Fortran) ────────────────────────────────────
     if (!lbfgs_initialized_) {
@@ -316,6 +356,7 @@ int LbfgsSolver::lbfgs_step(int n,
             // line search iteration (set before the first mcsrch call) and is needed
             // for the gradient-difference W[IYPT+NPT+I] = G[I] - W[I] later.
             stp_ = stp;
+            ddx_ = ddx;
             ddx_out = ddx;
             return 1;
         }
@@ -340,8 +381,10 @@ int LbfgsSolver::lbfgs_step(int n,
         raw_gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
         crit_conv_ = raw_gnorm_ / 100.0 + std::abs(ddx) / xnorm0;
         stp_ = stp;
+        ddx_ = ddx;
         ddx_out = ddx;
         print_monitor_iteration(iter_, nfun_, f, crit_conv_, stp, crit_conv_ <= eps_);
+        print_accept_trace(iter_, nfun_, f, crit_conv_, raw_gnorm_, ddx, xnorm0, stp);
         if (accepted_step_observer_) {
             accepted_step_observer_(iter_, nfun_, f, crit_conv_, stp, x, g);
         }
@@ -494,6 +537,7 @@ int LbfgsSolver::lbfgs_step(int n,
         if (info == -1) {
             for (int i = 0; i < n; ++i) w[static_cast<std::size_t>(i)] = g[i];
             stp_ = stp;
+            ddx_ = ddx;
             ddx_out = ddx;
             return 1;
         }
@@ -514,8 +558,10 @@ int LbfgsSolver::lbfgs_step(int n,
         raw_gnorm_ = std::sqrt(vec_dot(n, g.data(), g.data()));
         crit_conv_ = raw_gnorm_ / 100.0 + std::abs(ddx) / xnorm0;
         stp_ = stp;
+        ddx_ = ddx;
         ddx_out = ddx;
         print_monitor_iteration(iter_, nfun_, f, crit_conv_, stp, crit_conv_ <= eps_);
+        print_accept_trace(iter_, nfun_, f, crit_conv_, raw_gnorm_, ddx, xnorm0, stp);
         if (accepted_step_observer_) {
             accepted_step_observer_(iter_, nfun_, f, crit_conv_, stp, x, g);
         }
@@ -687,8 +733,11 @@ int LbfgsSolver::mcsrch(int n,
     double slen = 0.0;
     for (int j = 0; j < n; ++j) {
         x[j] = wa[static_cast<std::size_t>(j)] + stp * s[j];
-        slen += s[j] * s[j];
     }
+    // MCSRCH uses the BLAS DDOT operation for ddX.  Use the same translated
+    // helper as LBFGS's other norms so the convergence test sees identical
+    // reduction order.
+    slen = vec_dot(n, s.data(), s.data());
     ddx = stp * std::sqrt(slen);
     nfev = nfev_ls_;
     return -1;  // needs f/g evaluation

@@ -53,6 +53,11 @@ struct AssemblyResult {
     EtaField eta_updates{};
 };
 
+struct RuntimeVdwPotential {
+    double energy{0.0};
+    double derivative{0.0};
+};
+
 SimulatorInput load_simulator_input(const std::string& case_dir);
 RuntimeState make_runtime_state(const SimulatorInput& input);
 CheckpointResumeResult load_runtime_checkpoint(const SimulatorInput& input,
@@ -61,6 +66,9 @@ CheckpointResumeResult load_runtime_checkpoint(const SimulatorInput& input,
                                               const RuntimeState& initial_state);
 
 Coords read_vtu_points(const std::string& path, int expected_points);
+
+RuntimeVdwPotential evaluate_runtime_vdw_cut_potential(const VdwData& vdw, double r);
+bool runtime_vdw_pair_allowed(const Mesh& mesh, const VdwData& vdw, int gauss_i, int gauss_j);
 
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       RuntimeState& state,

@@ -138,3 +138,34 @@ TEST(LbfgsStopOnFirstTrial, OnlyTerminatesWhenEnabled) {
     EXPECT_GT(disabled_calls, 1);
     EXPECT_FALSE(disabled_solver.stopped_on_trial_gnorm_gate());
 }
+
+TEST(LbfgsConvergenceCriterion, IncludesPersistedStepNorm) {
+    std::vector<double> x(static_cast<std::size_t>(5), 1.0);
+    const double xnorm0 = std::sqrt(5.0);
+
+    fce::LbfgsSolver solver(10, 1.0e-8, 1.0e-12, 20000);
+    bool captured_first_accept = false;
+    double first_crit = 0.0;
+    double first_raw_gnorm = 0.0;
+
+    solver.set_accepted_step_observer(
+        [&](const int iter,
+            const int,
+            const double,
+            const double critc,
+            const double,
+            const std::vector<double>&,
+            const std::vector<double>&) {
+            if (iter == 1 && !captured_first_accept) {
+                captured_first_accept = true;
+                first_crit = critc;
+                first_raw_gnorm = solver.raw_gnorm();
+            }
+        });
+
+    const int flag = solver.minimize(x, xnorm0, /*stop_on_first_trial=*/false, quadratic_callback);
+
+    EXPECT_LE(flag, 0);
+    ASSERT_TRUE(captured_first_accept);
+    EXPECT_GT(first_crit, first_raw_gnorm / 100.0 + 0.1);
+}

@@ -19,10 +19,6 @@ constexpr std::array<std::array<int, 2>, 3> kBondPermutations{{
     {{0, 1}},
 }};
 
-Vec2 operator*(double s, const Vec2& a) {
-    return Vec2{s * a[0], s * a[1]};
-}
-
 Voigt3 operator*(double s, const Voigt3& a) {
     return Voigt3{s * a[0], s * a[1], s * a[2]};
 }
@@ -71,8 +67,6 @@ BondState compute_deformed_bonds(const Voigt3& C_elem,
                                  const std::array<Vec2, 3>& Ei) {
     BondState out;
     std::array<std::array<double, 3>, 3> a_def{};
-    const bool zero_curvature =
-        curvppal[0] == 0.0 && curvppal[1] == 0.0;
 
     for (int i = 0; i < 3; ++i) {
         const Vec2 ttemp = c_vec(C_elem, Ei[i]);
@@ -80,12 +74,6 @@ BondState compute_deformed_bonds(const Voigt3& C_elem,
         const double temp4 = vppal[1][0] * ttemp[0] + vppal[1][1] * ttemp[1];
         const double p = A_norm[i] * temp3;
         const double q = A_norm[i] * temp4;
-
-        if (zero_curvature) {
-            a_def[i] = {p, q, 0.0};
-            out.pe[i] = std::sqrt(p * p + q * q);
-            continue;
-        }
 
         const double f1 = sinxx(curvppal[0] * p);
         const double f2 = sinxx(curvppal[1] * q);
@@ -109,6 +97,7 @@ BondState compute_deformed_bonds(const Voigt3& C_elem,
         const double temp6 = a_def[i][0] * a_def[j][0] +
                              a_def[i][1] * a_def[j][1] +
                              a_def[i][2] * a_def[j][2];
+        // def_bonds_.f90 evaluates the two divisions sequentially.
         out.pe[3 + k] = temp6 / out.pe[i] / out.pe[j];
         out.pe[3 + k] = std::acos(out.pe[3 + k]);
     }
@@ -173,9 +162,28 @@ BondStateWithDerivatives compute_deformed_bonds_with_derivatives(
 
         dadC[i][0] = dpdC * f1 + dtemp11 * (p * g1);
         dadC[i][1] = dqdC * f2 + dtemp22 * (q * g2);
-        dadC[i][2] =
-            0.5 * (dtemp31 * (f12 * f12) + dtemp11 * (curvppal[0] * p * p * f12 * g12) +
-                   dtemp41 * (f22 * f22) + dtemp22 * (curvppal[1] * q * q * f22 * g22));
+        // Keep the left-associated products and final division used by
+        // exponential.f90.  In particular, Fortran evaluates
+        // dtemp3*f12*f12, rather than dtemp3*(f12*f12), and divides the
+        // completed sum by 2.  These are algebraically identical but the
+        // last bits feed the cancellation-sensitive free gradient.
+        for (int component = 0; component < 3; ++component) {
+            double term1 = dtemp31[component] * f12;
+            term1 *= f12;
+            double term2 = curvppal[0] * p;
+            term2 *= p;
+            term2 *= f12;
+            term2 *= g12;
+            term2 *= dtemp11[component];
+            double term3 = dtemp41[component] * f22;
+            term3 *= f22;
+            double term4 = curvppal[1] * q;
+            term4 *= q;
+            term4 *= f22;
+            term4 *= g22;
+            term4 *= dtemp22[component];
+            dadC[i][2][component] = (term1 + term2 + term3 + term4) / 2.0;
+        }
 
         const Voigt3 dtemp12 = p * dcurvppaldk[0] + curvppal[0] * dpdk;
         const Voigt3 dtemp23 = q * dcurvppaldk[1] + curvppal[1] * dqdk;
@@ -184,9 +192,23 @@ BondStateWithDerivatives compute_deformed_bonds_with_derivatives(
 
         dadk[i][0] = dpdk * f1 + dtemp12 * (p * g1);
         dadk[i][1] = dqdk * f2 + dtemp23 * (q * g2);
-        dadk[i][2] =
-            0.5 * (dtemp32 * (f12 * f12) + dtemp12 * (curvppal[0] * p * p * f12 * g12) +
-                   dtemp42 * (f22 * f22) + dtemp23 * (curvppal[1] * q * q * f22 * g22));
+        for (int component = 0; component < 3; ++component) {
+            double term1 = dtemp32[component] * f12;
+            term1 *= f12;
+            double term2 = curvppal[0] * p;
+            term2 *= p;
+            term2 *= f12;
+            term2 *= g12;
+            term2 *= dtemp12[component];
+            double term3 = dtemp42[component] * f22;
+            term3 *= f22;
+            double term4 = curvppal[1] * q;
+            term4 *= q;
+            term4 *= f22;
+            term4 *= g22;
+            term4 *= dtemp23[component];
+            dadk[i][2][component] = (term1 + term2 + term3 + term4) / 2.0;
+        }
 
         out.pe[i] = norm3(a_def[i]);
         if (out.pe[i] <= 0.0) {
@@ -203,7 +225,10 @@ BondStateWithDerivatives compute_deformed_bonds_with_derivatives(
         const int i = kBondPermutations[k][0];
         const int j = kBondPermutations[k][1];
         const double temp6 = dot3(a_def[i], a_def[j]);
-        const double cosine = std::clamp(temp6 / (out.pe[i] * out.pe[j]), -1.0, 1.0);
+        // Match def_bonds.f90's sequential divisions.  Multiplying the two
+        // norms first changes the angle and its derivative by a last-bit
+        // amount on the flat cyclic seed.
+        const double cosine = temp6 / out.pe[i] / out.pe[j];
         out.pe[3 + k] = std::acos(cosine);
         const double fact = -1.0 / std::sin(out.pe[3 + k]) / out.pe[i] / out.pe[j];
 
@@ -211,13 +236,13 @@ BondStateWithDerivatives compute_deformed_bonds_with_derivatives(
             a_def[j][0] * dadC[i][0] + a_def[j][1] * dadC[i][1] + a_def[j][2] * dadC[i][2] +
             a_def[i][0] * dadC[j][0] + a_def[i][1] * dadC[j][1] + a_def[i][2] * dadC[j][2];
         out.dpedC[3 + k] =
-            fact * (dtemp11 - temp6 * ((1.0 / out.pe[i]) * out.dpedC[i] + (1.0 / out.pe[j]) * out.dpedC[j]));
+            fact * (dtemp11 - temp6 * (out.dpedC[i] / out.pe[i] + out.dpedC[j] / out.pe[j]));
 
         const Voigt3 dtemp12 =
             a_def[j][0] * dadk[i][0] + a_def[j][1] * dadk[i][1] + a_def[j][2] * dadk[i][2] +
             a_def[i][0] * dadk[j][0] + a_def[i][1] * dadk[j][1] + a_def[i][2] * dadk[j][2];
         out.dpedk[3 + k] =
-            fact * (dtemp12 - temp6 * ((1.0 / out.pe[i]) * out.dpedk[i] + (1.0 / out.pe[j]) * out.dpedk[j]));
+            fact * (dtemp12 - temp6 * (out.dpedk[i] / out.pe[i] + out.dpedk[j] / out.pe[j]));
     }
 
     return out;

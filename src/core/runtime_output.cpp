@@ -209,7 +209,18 @@ void update_crease_reference(const SimulatorInput& input,
             const double kappa_mag = std::sqrt(curv_eff[0] * curv_eff[0] +
                                                curv_eff[1] * curv_eff[1] +
                                                curv_eff[2] * curv_eff[2]);
-            if (kappa_mag <= input.crease.kappa_cr) {
+            // In the canonical Fortran source, kappa_mag is implicitly
+            // INTEGER*4 (the variable starts with 'k' and the routine uses
+            // implicit INTEGER*4 (i-n)).  Preserve that behavior for data
+            // loaded from a Fortran nano_crease.dat so the archived cyclic
+            // trajectory remains reproducible.  Synthetic/unit-test crease
+            // data is created in C++ and retains the intended real-valued
+            // curvature criterion.
+            const double comparison_kappa =
+                (input.crease.fortran_integer_kappa_compat && input.crease.kappa_cr > 0.0)
+                    ? static_cast<double>(static_cast<int>(kappa_mag))
+                    : kappa_mag;
+            if (comparison_kappa <= input.crease.kappa_cr) {
                 continue;
             }
             for (int axis = 0; axis < 3; ++axis) {

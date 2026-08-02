@@ -47,12 +47,6 @@ MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient1
     const double f01 = f0[0][1];
     const double f10 = f0[1][0];
     const double f11 = f0[1][1];
-    const double f00_sq = f00 * f00;
-    const double f01_sq = f01 * f01;
-    const double f10_sq = f10 * f10;
-    const double f11_sq = f11 * f11;
-    const double f00f10_twice = 2.0 * f00 * f10;
-    const double f01f11_twice = 2.0 * f01 * f11;
     const double shear_coeff = f00 * f11 + f01 * f10;
 
     for (int idir = 0; idir < 2; ++idir) {
@@ -74,9 +68,15 @@ MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient1
                        g_convect[0][2] * g_convect[1][2];
     const Voigt3 g_elem{g11, g22, g12};
 
-    out.C_elem[0] = g_elem[0] * f00_sq + g_elem[2] * f00f10_twice + g_elem[1] * f10_sq;
-    out.C_elem[2] = g_elem[0] * f00 * f01 + g_elem[2] * shear_coeff + g_elem[1] * f10 * f11;
-    out.C_elem[1] = g_elem[0] * f01_sq + g_elem[2] * f01f11_twice + g_elem[1] * f11_sq;
+    out.C_elem[0] = g_elem[0] * f00 * f00 +
+                    2.0 * g_elem[2] * f00 * f10 +
+                    g_elem[1] * f10 * f10;
+    out.C_elem[2] = g_elem[0] * f00 * f01 +
+                    g_elem[2] * shear_coeff +
+                    g_elem[1] * f10 * f11;
+    out.C_elem[1] = g_elem[0] * f01 * f01 +
+                    2.0 * g_elem[2] * f01 * f11 +
+                    g_elem[1] * f11 * f11;
 
     out.xnor_elem = Vec3{
         g_convect[0][1] * g_convect[1][2] - g_convect[0][2] * g_convect[1][1],
@@ -87,7 +87,11 @@ MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient1
     if (xnorm <= 1e-16 || !std::isfinite(xnorm)) {
         throw std::invalid_argument("geometry metric encountered degenerate surface normal");
     }
-    out.xnor_elem = (1.0 / xnorm) * out.xnor_elem;
+    out.xnor_elem = Vec3{
+        out.xnor_elem[0] / xnorm,
+        out.xnor_elem[1] / xnorm,
+        out.xnor_elem[2] / xnorm,
+    };
 
     for (int node = 0; node < 12; ++node) {
         for (int idof = 0; idof < 3; ++idof) {
@@ -102,9 +106,15 @@ MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient1
                 2.0 * dn2 * g_convect[1][idof],
                 dn1 * g_convect[1][idof] + dn2 * g_convect[0][idof],
             };
-            out.dC[node][idof][0] = dg[0] * f00_sq + dg[2] * f00f10_twice + dg[1] * f10_sq;
-            out.dC[node][idof][2] = dg[0] * f00 * f01 + dg[2] * shear_coeff + dg[1] * f10 * f11;
-            out.dC[node][idof][1] = dg[0] * f01_sq + dg[2] * f01f11_twice + dg[1] * f11_sq;
+            out.dC[node][idof][0] = dg[0] * f00 * f00 +
+                                     2.0 * dg[2] * f00 * f10 +
+                                     dg[1] * f10 * f10;
+            out.dC[node][idof][2] = dg[0] * f00 * f01 +
+                                     dg[2] * shear_coeff +
+                                     dg[1] * f10 * f11;
+            out.dC[node][idof][1] = dg[0] * f01 * f01 +
+                                     2.0 * dg[2] * f01 * f11 +
+                                     dg[1] * f11 * f11;
 
             const double dJ =
                 ((dn1 * g_elem[1] - dn2 * g_elem[2]) * g_convect[0][idof] -
@@ -118,7 +128,12 @@ MetricResult compute_metric(const NeighborCoords12& xneigh, const ShapeGradient1
             } else {
                 cross_term = Vec3{temp1, -temp0, 0.0};
             }
-            out.dnorm[node][idof] = (1.0 / xnorm) * (cross_term - dJ * out.xnor_elem);
+            const Vec3 dnormal = cross_term - dJ * out.xnor_elem;
+            out.dnorm[node][idof] = Vec3{
+                dnormal[0] / xnorm,
+                dnormal[1] / xnorm,
+                dnormal[2] / xnorm,
+            };
         }
     }
 
@@ -136,12 +151,6 @@ CurvatureResult compute_curvature(const NeighborCoords12& xneigh,
     const double f01 = f0[0][1];
     const double f10 = f0[1][0];
     const double f11 = f0[1][1];
-    const double f00_sq = f00 * f00;
-    const double f01_sq = f01 * f01;
-    const double f10_sq = f10 * f10;
-    const double f11_sq = f11 * f11;
-    const double f00f10_twice = 2.0 * f00 * f10;
-    const double f01f11_twice = 2.0 * f01 * f11;
     const double shear_coeff = f00 * f11 + f01 * f10;
 
     for (int idir = 0; idir < 3; ++idir) {
@@ -157,9 +166,15 @@ CurvatureResult compute_curvature(const NeighborCoords12& xneigh,
         xnor_elem[0] * aux[1][0] + xnor_elem[1] * aux[1][1] + xnor_elem[2] * aux[1][2],
         xnor_elem[0] * aux[2][0] + xnor_elem[1] * aux[2][1] + xnor_elem[2] * aux[2][2],
     };
-    out.curv0_elem[0] = curv0_aux[0] * f00_sq + curv0_aux[2] * f00f10_twice + curv0_aux[1] * f10_sq;
-    out.curv0_elem[2] = curv0_aux[0] * f00 * f01 + curv0_aux[2] * shear_coeff + curv0_aux[1] * f10 * f11;
-    out.curv0_elem[1] = curv0_aux[0] * f01_sq + curv0_aux[2] * f01f11_twice + curv0_aux[1] * f11_sq;
+    out.curv0_elem[0] = curv0_aux[0] * f00 * f00 +
+                        2.0 * curv0_aux[2] * f00 * f10 +
+                        curv0_aux[1] * f10 * f10;
+    out.curv0_elem[2] = curv0_aux[0] * f00 * f01 +
+                        curv0_aux[2] * shear_coeff +
+                        curv0_aux[1] * f10 * f11;
+    out.curv0_elem[1] = curv0_aux[0] * f01 * f01 +
+                        2.0 * curv0_aux[2] * f01 * f11 +
+                        curv0_aux[1] * f11 * f11;
 
     for (int node = 0; node < 12; ++node) {
         for (int idof = 0; idof < 3; ++idof) {
@@ -171,9 +186,15 @@ CurvatureResult compute_curvature(const NeighborCoords12& xneigh,
                 aux[2][0] * dnorm[node][idof][0] + aux[2][1] * dnorm[node][idof][1] +
                     aux[2][2] * dnorm[node][idof][2] + ddn[node][2] * xnor_elem[idof],
             };
-            out.dcurv[node][idof][0] = dk[0] * f00_sq + dk[2] * f00f10_twice + dk[1] * f10_sq;
-            out.dcurv[node][idof][2] = dk[0] * f00 * f01 + dk[2] * shear_coeff + dk[1] * f10 * f11;
-            out.dcurv[node][idof][1] = dk[0] * f01_sq + dk[2] * f01f11_twice + dk[1] * f11_sq;
+            out.dcurv[node][idof][0] = dk[0] * f00 * f00 +
+                                       2.0 * dk[2] * f00 * f10 +
+                                       dk[1] * f10 * f10;
+            out.dcurv[node][idof][2] = dk[0] * f00 * f01 +
+                                       dk[2] * shear_coeff +
+                                       dk[1] * f10 * f11;
+            out.dcurv[node][idof][1] = dk[0] * f01 * f01 +
+                                       2.0 * dk[2] * f01 * f11 +
+                                       dk[1] * f11 * f11;
         }
     }
 

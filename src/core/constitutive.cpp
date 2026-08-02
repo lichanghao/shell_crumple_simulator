@@ -1,5 +1,10 @@
 #include "fce/constitutive.hpp"
 
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#pragma clang fp reassociate(off)
+#endif
+
 #include "fce/element_state.hpp"
 #include "fce/exponential.hpp"
 #include "fce/taylor.hpp"
@@ -136,11 +141,13 @@ std::array<Vec3, 3> gang_bis(const Vec3& theta, const MatData& mat) {
         const double aux1 = 1.0 + aux0;
         const double aux2 = mat.Va[2] + aux1 * aux1;
         ga[0][i] = 1.0 + (mat.Va[1] / mat.Va[2]) - (mat.Va[1] / aux2);
-        ga[1][i] = -2.0 / (aux2 * aux2) * mat.Va[1] * aux1 * std::sin(theta[i]);
+        // Match Gang_bis.f90's left-associated divisions: -2/aux2/aux2.
+        const double sin_theta = std::sin(theta[i]);
+        ga[1][i] = -2.0 / aux2 / aux2 * mat.Va[1] * aux1 * sin_theta;
         ga[2][i] =
-            2.0 / (aux2 * aux2 * aux2) * mat.Va[1] *
+            2.0 / aux2 / aux2 / aux2 * mat.Va[1] *
             (((1.0 - aux0 - 2.0 * aux0 * aux0) * aux2) -
-             4.0 * std::pow(aux1 * std::sin(theta[i]), 2.0));
+             4.0 * std::pow(aux1 * sin_theta, 2.0));
     }
     for (auto& row : ga) {
         for (double& value : row) {
@@ -167,11 +174,15 @@ Vec3 vatt_bis(const double a, const MatData& mat) {
 Vec3 vstretch_bis(const double a, const MatData& mat) {
     const double ex = std::exp(-mat.Vs[1] * (a - mat.A0));
     const double stretch = 1.0 - ex;
-    return Vec3{
-        mat.Vs[0] * stretch * stretch,
-        mat.Vs[0] * 2.0 * mat.Vs[1] * ex * stretch,
-        mat.Vs[0] * 2.0 * mat.Vs[1] * mat.Vs[1] * (ex * ex - ex * stretch),
+    Vec3 out{
+        stretch * stretch,
+        2.0 * mat.Vs[1] * ex * stretch,
+        2.0 * (mat.Vs[1] * mat.Vs[1]) * (ex * ex - ex * stretch),
     };
+    for (double& value : out) {
+        value *= mat.Vs[0];
+    }
+    return out;
 }
 
 Vec3 vangle_bis(const double ang, const MatData& mat) {
@@ -179,11 +190,15 @@ Vec3 vangle_bis(const double ang, const MatData& mat) {
     const double t1 = ang - kAngle0;
     const double t2 = t1 * t1;
     const double t4 = t2 * t2;
-    return Vec3{
-        mat.Va[0] * 0.5 * t2 * (1.0 + mat.Va[1] * t4),
-        mat.Va[0] * t1 * (1.0 + 3.0 * mat.Va[1] * t4),
-        mat.Va[0] * (1.0 + 15.0 * mat.Va[1] * t4),
+    Vec3 out{
+        0.5 * t2 * (1.0 + mat.Va[1] * t4),
+        t1 * (1.0 + 3.0 * mat.Va[1] * t4),
+        1.0 + 15.0 * mat.Va[1] * t4,
     };
+    for (double& value : out) {
+        value *= mat.Va[0];
+    }
+    return out;
 }
 
 struct InnerBrennerEtaOutput {
@@ -344,15 +359,18 @@ InnerPotentialOutput evaluate_inner_potential_from_prepared_state(const ElementS
         dpedeta_all[i] =
             (a_def[i][0] * dadeta[i][0] + a_def[i][1] * dadeta[i][1] + a_def[i][2] * dadeta[i][2]) / pe[i];
 
-        Voigt3 aux1{
+        const Voigt3 aux1_eta{
             dadeta[i][0][0] * dadeta[i][0][0] + dadeta[i][1][0] * dadeta[i][1][0] +
                 dadeta[i][2][0] * dadeta[i][2][0],
             dadeta[i][0][1] * dadeta[i][0][1] + dadeta[i][1][1] * dadeta[i][1][1] +
-                dadeta[i][2][1] * dadeta[i][2][1],
+            dadeta[i][2][1] * dadeta[i][2][1],
             dadeta[i][0][0] * dadeta[i][0][1] + dadeta[i][1][0] * dadeta[i][1][1] +
                 dadeta[i][2][0] * dadeta[i][2][1],
         };
-        aux1 = aux1 + a_def[i][0] * ddadeta[i][0] + a_def[i][1] * ddadeta[i][1] + a_def[i][2] * ddadeta[i][2];
+        const Voigt3 aux1 = a_def[i][0] * ddadeta[i][0] +
+                            a_def[i][1] * ddadeta[i][1] +
+                            a_def[i][2] * ddadeta[i][2] +
+                            aux1_eta;
         const Voigt3 aux2{
             dpedeta_all[i][0] * dpedeta_all[i][0],
             dpedeta_all[i][1] * dpedeta_all[i][1],
@@ -374,7 +392,8 @@ InnerPotentialOutput evaluate_inner_potential_from_prepared_state(const ElementS
 
         Vec2 ttemp = a_def[j][0] * dadeta[i][0] + a_def[j][1] * dadeta[i][1] + a_def[j][2] * dadeta[i][2] +
                      a_def[i][0] * dadeta[j][0] + a_def[i][1] * dadeta[j][1] + a_def[i][2] * dadeta[j][2];
-        ttemp = (ttemp - temp6 * (dpedeta_all[i] / pe[i] + dpedeta_all[j] / pe[j])) / (pe[i] * pe[j]);
+        ttemp = (ttemp - temp6 * (dpedeta_all[i] / pe[i] + dpedeta_all[j] / pe[j])) /
+                pe[i] / pe[j];
         dpedeta_all[3 + k] = (-1.0 / sin_theta) * ttemp;
 
         Voigt3 aux1{0.0, 0.0, 0.0};
@@ -386,8 +405,13 @@ InnerPotentialOutput evaluate_inner_potential_from_prepared_state(const ElementS
                                    dadeta[i][icomp][1] * dadeta[j][icomp][0],
                            };
         }
-        aux1 = aux1 + a_def[j][0] * ddadeta[i][0] + a_def[j][1] * ddadeta[i][1] + a_def[j][2] * ddadeta[i][2] +
-               a_def[i][0] * ddadeta[j][0] + a_def[i][1] * ddadeta[j][1] + a_def[i][2] * ddadeta[j][2];
+        aux1 = a_def[j][0] * ddadeta[i][0] +
+               a_def[j][1] * ddadeta[i][1] +
+               a_def[j][2] * ddadeta[i][2] +
+               a_def[i][0] * ddadeta[j][0] +
+               a_def[i][1] * ddadeta[j][1] +
+               a_def[i][2] * ddadeta[j][2] +
+               aux1;
 
         const Vec2 xaux = pe[j] * dpedeta_all[i] + pe[i] * dpedeta_all[j];
         Voigt3 aux2{
@@ -395,15 +419,15 @@ InnerPotentialOutput evaluate_inner_potential_from_prepared_state(const ElementS
             2.0 * ttemp[1] * xaux[1],
             ttemp[0] * xaux[1] + ttemp[1] * xaux[0],
         };
-        aux2 = (aux1 - aux2 -
+        aux2 = (1.0 / pe[i] / pe[j]) *
+               (aux1 - aux2 -
                 temp7 * (pe[j] * ddpedeta[i] + pe[i] * ddpedeta[j] +
                          Voigt3{
                              2.0 * dpedeta_all[i][0] * dpedeta_all[j][0],
                              2.0 * dpedeta_all[i][1] * dpedeta_all[j][1],
                              dpedeta_all[i][0] * dpedeta_all[j][1] +
                                  dpedeta_all[i][1] * dpedeta_all[j][0],
-                         })) /
-               (pe[i] * pe[j]);
+                         }));
         const Voigt3 aux3{
             dpedeta_all[3 + k][0] * dpedeta_all[3 + k][0],
             dpedeta_all[3 + k][1] * dpedeta_all[3 + k][1],
@@ -570,8 +594,9 @@ BrennerOutput evaluate_brenner(const MatData& mat, const Vec6& pe) {
 
         out.W += vr[0] - fang * va[0];
         out.dW[ibond] = vr[1] - fang * va[1];
-        out.dW[3 + ip1] += va[0] * std::pow(fang, 3.0) * ga[1][ip1] / 2.0;
-        out.dW[3 + ip2] += va[0] * std::pow(fang, 3.0) * ga[1][ip2] / 2.0;
+        const double fang3 = fang * fang * fang;
+        out.dW[3 + ip1] += va[0] * fang3 * ga[1][ip1] / 2.0;
+        out.dW[3 + ip2] += va[0] * fang3 * ga[1][ip2] / 2.0;
 
         out.ddW[ibond][ibond] = vr[2] - fang * va[2];
         out.ddW[3 + ip1][3 + ip1] +=

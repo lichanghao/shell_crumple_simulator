@@ -11,6 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #ifndef ORACLE_DIR
@@ -166,6 +167,48 @@ std::size_t count_output_load_steps(const fs::path& output_path) {
         }
     }
     return count;
+}
+
+void translate_tube_nodes(fce::Coords& coords,
+                          const fce::Mesh& mesh,
+                          const fce::VdwData& vdw,
+                          const int tube,
+                          const fce::Vec3& delta) {
+    ASSERT_GE(tube, 0);
+    ASSERT_LT(tube, static_cast<int>(vdw.tub_partitions.size()));
+    const auto [gp_begin, gp_end] = vdw.tub_partitions.at(static_cast<std::size_t>(tube));
+    ASSERT_EQ(gp_begin % vdw.ngauss_vdw, 0);
+    ASSERT_EQ(gp_end % vdw.ngauss_vdw, 0);
+
+    std::unordered_set<int> moved;
+    for (int ielem = gp_begin / vdw.ngauss_vdw; ielem < gp_end / vdw.ngauss_vdw; ++ielem) {
+        const auto& elem = mesh.connect.at(static_cast<std::size_t>(ielem));
+        for (const int node : elem.neigh_vert) {
+            if (node < 0 || node >= mesh.numnods || moved.find(node) != moved.end()) {
+                continue;
+            }
+            for (int axis = 0; axis < 3; ++axis) {
+                coords.at(static_cast<std::size_t>(node))[axis] += delta[axis];
+            }
+            moved.insert(node);
+        }
+    }
+    ASSERT_FALSE(moved.empty());
+}
+
+int first_bilayer_element_with_runtime_vdw(const fce::SimulatorInput& input) {
+    if (input.vdw.tub_partitions.size() < 2U) {
+        throw std::runtime_error("bilayer fixture has fewer than two tube partitions");
+    }
+    const auto [gp_begin, gp_end] = input.vdw.tub_partitions.front();
+    for (int ielem = gp_begin / input.vdw.ngauss_vdw; ielem < gp_end / input.vdw.ngauss_vdw; ++ielem) {
+        auto state = fce::make_runtime_state(input);
+        const auto result = fce::assemble_energy_forces(input, state, ielem, ielem + 1);
+        if (std::abs(result.vdw_reduced_energy) > 0.0) {
+            return ielem;
+        }
+    }
+    return -1;
 }
 
 }  // namespace
@@ -356,6 +399,141 @@ TEST(SimulatorAssembly, SelfContactRuntimeVdwContributesEnergyAndForces) {
     EXPECT_GT(std::sqrt(force_delta_norm), 0.0);
 }
 
+TEST(SimulatorAssembly, RuntimeVdwCutPotentialIsZeroAtAndBeyondCutoff) {
+    const auto input = fce::load_simulator_input(self_contact_case_dir().string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_GT(input.vdw.r_cut, 0.0);
+
+    const auto inside = fce::evaluate_runtime_vdw_cut_potential(input.vdw, 0.75 * input.vdw.r_cut);
+    EXPECT_TRUE(std::isfinite(inside.energy));
+    EXPECT_TRUE(std::isfinite(inside.derivative));
+    EXPECT_NE(inside.energy, 0.0);
+
+    const auto at_cutoff = fce::evaluate_runtime_vdw_cut_potential(input.vdw, input.vdw.r_cut);
+    EXPECT_DOUBLE_EQ(at_cutoff.energy, 0.0);
+    EXPECT_DOUBLE_EQ(at_cutoff.derivative, 0.0);
+
+    const auto beyond_cutoff = fce::evaluate_runtime_vdw_cut_potential(input.vdw, 1.25 * input.vdw.r_cut);
+    EXPECT_DOUBLE_EQ(beyond_cutoff.energy, 0.0);
+    EXPECT_DOUBLE_EQ(beyond_cutoff.derivative, 0.0);
+}
+
+TEST(SimulatorAssembly, SelfContactRuntimeVdwExcludesSameAndAdjacentElements) {
+    const auto input = fce::load_simulator_input(self_contact_case_dir().string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_EQ(input.vdw.nneigh, -2);
+    ASSERT_GT(input.vdw.ngauss_vdw, 0);
+
+    EXPECT_FALSE(fce::runtime_vdw_pair_allowed(input.mesh, input.vdw, 0, 1));
+
+    int element = -1;
+    int adjacent = -1;
+    for (int ielem = 0; ielem < input.mesh.numele && adjacent < 0; ++ielem) {
+        const auto& conn = input.mesh.connect.at(static_cast<std::size_t>(ielem));
+        for (const int neighbor_one_based : conn.neigh_elem) {
+            const int neighbor = neighbor_one_based - 1;
+            if (neighbor >= 0 && neighbor != ielem) {
+                element = ielem;
+                adjacent = neighbor;
+                break;
+            }
+        }
+    }
+    ASSERT_GE(element, 0);
+    ASSERT_GE(adjacent, 0);
+    EXPECT_FALSE(fce::runtime_vdw_pair_allowed(input.mesh,
+                                               input.vdw,
+                                               element * input.vdw.ngauss_vdw,
+                                               adjacent * input.vdw.ngauss_vdw));
+
+    std::unordered_set<int> excluded;
+    excluded.insert(element);
+    const auto& conn = input.mesh.connect.at(static_cast<std::size_t>(element));
+    for (const int neighbor_one_based : conn.neigh_elem) {
+        if (neighbor_one_based > 0) {
+            excluded.insert(neighbor_one_based - 1);
+        }
+    }
+
+    int non_adjacent = -1;
+    for (int candidate = 0; candidate < input.mesh.numele; ++candidate) {
+        if (excluded.find(candidate) == excluded.end()) {
+            non_adjacent = candidate;
+            break;
+        }
+    }
+    ASSERT_GE(non_adjacent, 0);
+    EXPECT_TRUE(fce::runtime_vdw_pair_allowed(input.mesh,
+                                              input.vdw,
+                                              element * input.vdw.ngauss_vdw,
+                                              non_adjacent * input.vdw.ngauss_vdw));
+}
+
+TEST(SimulatorAssembly, BilayerRuntimeVdwAllowsOnlyNextTubePairs) {
+    const auto input = fce::load_simulator_input(bilayer_nwhat_case_dir().string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_EQ(input.vdw.nneigh, -1);
+    ASSERT_GE(input.vdw.tub_partitions.size(), 2U);
+
+    const int tube0_gp = input.vdw.tub_partitions[0].first;
+    const int tube1_gp = input.vdw.tub_partitions[1].first;
+    ASSERT_LT(tube0_gp, input.vdw.tub_partitions[0].second);
+    ASSERT_LT(tube1_gp, input.vdw.tub_partitions[1].second);
+
+    EXPECT_TRUE(fce::runtime_vdw_pair_allowed(input.mesh, input.vdw, tube0_gp, tube1_gp));
+    EXPECT_FALSE(fce::runtime_vdw_pair_allowed(input.mesh,
+                                               input.vdw,
+                                               tube0_gp,
+                                               tube0_gp + input.vdw.ngauss_vdw));
+    EXPECT_FALSE(fce::runtime_vdw_pair_allowed(input.mesh, input.vdw, tube1_gp, tube0_gp));
+
+    if (input.vdw.tub_partitions.size() >= 3U) {
+        const int tube2_gp = input.vdw.tub_partitions[2].first;
+        EXPECT_FALSE(fce::runtime_vdw_pair_allowed(input.mesh, input.vdw, tube0_gp, tube2_gp));
+    }
+}
+
+TEST(SimulatorAssembly, BilayerRuntimeVdwVanishesWhenAdjacentTubeMovesBeyondCutoff) {
+    const auto input = fce::load_simulator_input(bilayer_nwhat_case_dir().string());
+    ASSERT_EQ(input.vdw.nvdw, 1);
+    ASSERT_EQ(input.vdw.nneigh, -1);
+    ASSERT_GE(input.vdw.tub_partitions.size(), 2U);
+
+    const int element = first_bilayer_element_with_runtime_vdw(input);
+    ASSERT_GE(element, 0);
+
+    auto baseline_state = fce::make_runtime_state(input);
+    const auto baseline = fce::assemble_energy_forces(input, baseline_state, element, element + 1);
+    ASSERT_NE(baseline.vdw_reduced_energy, 0.0);
+
+    auto shifted_coords = input.initial_config.coords;
+    translate_tube_nodes(shifted_coords,
+                         input.mesh,
+                         input.vdw,
+                         /*tube=*/1,
+                         fce::Vec3{0.0, 0.0, 10.0 * input.vdw.r_cut});
+
+    auto no_vdw_input = input;
+    no_vdw_input.vdw.nvdw = 0;
+
+    auto shifted_state = fce::make_runtime_state(input);
+    shifted_state.coords = shifted_coords;
+    auto no_vdw_state = fce::make_runtime_state(no_vdw_input);
+    no_vdw_state.coords = shifted_coords;
+
+    const auto shifted = fce::assemble_energy_forces(input, shifted_state, element, element + 1);
+    const auto no_vdw = fce::assemble_energy_forces(no_vdw_input, no_vdw_state, element, element + 1);
+
+    EXPECT_NEAR(shifted.vdw_reduced_energy, 0.0, 1e-18);
+    EXPECT_NEAR(shifted.total_energy,
+                no_vdw.total_energy,
+                std::max(1e-12, std::abs(no_vdw.total_energy) * 1e-12));
+    ASSERT_EQ(shifted.force.size(), no_vdw.force.size());
+    for (std::size_t i = 0; i < shifted.force.size(); ++i) {
+        EXPECT_NEAR(shifted.force[i], no_vdw.force[i], 1e-12) << "force[" << i << "]";
+    }
+}
+
 TEST(SimulatorAssembly, SelfContactRuntimeVdwStridedRangesSumToContiguousAssembly) {
     const auto input = fce::load_simulator_input(self_contact_case_dir().string());
     const auto coords = input.initial_config.coords;
@@ -405,7 +583,9 @@ TEST(SimulatorAssembly, SelfContactStepOneEnergyComponentsMatchFortranOracle) {
 
     EXPECT_NEAR(result.total_energy, expected.total, relative_tolerance(expected.total));
     EXPECT_NEAR(result.reduced_energy, expected.internal, relative_tolerance(expected.internal));
-    EXPECT_NEAR(result.vdw_reduced_energy, expected.vdw, relative_tolerance(expected.vdw));
+    // The archived energy row prints E_vdw to eight decimal places, so this is
+    // the tightest useful absolute tolerance for the committed text fixture.
+    EXPECT_NEAR(result.vdw_reduced_energy, expected.vdw, 5e-10);
     EXPECT_EQ(result.inner_fail, 0);
 }
 

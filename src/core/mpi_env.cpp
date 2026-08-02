@@ -41,6 +41,15 @@ void MpiEnv::allreduce_sum(std::vector<double>& v) const {
     v = std::move(tmp);
 }
 
+void MpiEnv::reduce_sum_to_root(std::vector<double>& v, const int root) const {
+    std::vector<double> reduced(v.size());
+    MPI_Reduce(v.data(), reduced.data(), static_cast<int>(v.size()),
+               MPI_DOUBLE, MPI_SUM, root, MPI_COMM_WORLD);
+    if (rank_ == root) {
+        v = std::move(reduced);
+    }
+}
+
 std::pair<int,int> element_partition(int n, int size, int rank) {
     int base  = n / size;
     int extra = n % size;

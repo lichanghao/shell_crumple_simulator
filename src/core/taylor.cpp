@@ -1,5 +1,10 @@
 #include "fce/taylor.hpp"
 
+#if defined(__clang__)
+#pragma clang fp contract(off)
+#pragma clang fp reassociate(off)
+#endif
+
 namespace fce {
 
 double sinxx(const double x) {

@@ -939,6 +939,7 @@ CreaseData read_crease(const std::string& path, int numnods, int ngauss) {
     c.ncrease = r.read_int();
     c.kappa_cr = r.read_double();
     c.alpha_lock = r.read_double();
+    c.fortran_integer_kappa_compat = true;
     (void)ngauss;
     return c;
 }

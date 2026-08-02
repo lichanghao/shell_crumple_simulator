@@ -511,57 +511,6 @@ std::vector<double> extract_free_gradient(const AssemblyResult& res,
     return g;
 }
 
-// ─── extract forces at all (free+bc) DOFs ────────────────────────────────────
-// Mirrors Fortran minimize_free gather loop.
-std::vector<double> extract_all_gradient(const AssemblyResult& res,
-                                          const BCData& bcs) {
-    const int ndof = bcs.ndofOP + bcs.ndofBC;
-    std::vector<double> g(static_cast<std::size_t>(ndof));
-    // Free DOFs.
-    for (int i = 0; i < bcs.ndofOP; ++i) {
-        const int flat_dof = bcs.mdofOP.at(static_cast<std::size_t>(i));
-        g[static_cast<std::size_t>(i)] = res.force.at(static_cast<std::size_t>(flat_dof));
-    }
-    // BC DOFs (appended after free DOFs in the combined vector).
-    for (int i = 0; i < bcs.ndofBC; ++i) {
-        const int flat_dof = bcs.mdofBC.at(static_cast<std::size_t>(i));
-        g[static_cast<std::size_t>(bcs.ndofOP + i)] = res.force.at(static_cast<std::size_t>(flat_dof));
-    }
-    return g;
-}
-
-// ─── scatter combined (free+bc) DOFs to coords ────────────────────────────────
-// Mirrors Fortran minimize_free scatter loop: x0(mdofOP(i)) = x_short(i).
-void scatter_all_dofs(const std::vector<double>& x_all,
-                       const BCData& bcs,
-                       Coords& coords) {
-    for (int i = 0; i < bcs.ndofOP; ++i) {
-        const int flat_dof = bcs.mdofOP.at(static_cast<std::size_t>(i));
-        coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3] =
-            x_all.at(static_cast<std::size_t>(i));
-    }
-    for (int i = 0; i < bcs.ndofBC; ++i) {
-        const int flat_dof = bcs.mdofBC.at(static_cast<std::size_t>(i));
-        coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3] =
-            x_all.at(static_cast<std::size_t>(bcs.ndofOP + i));
-    }
-}
-
-// ─── gather combined (free+bc) DOFs from coords ───────────────────────────────
-std::vector<double> gather_all_dofs(const Coords& coords, const BCData& bcs) {
-    const int ndof = bcs.ndofOP + bcs.ndofBC;
-    std::vector<double> x(static_cast<std::size_t>(ndof));
-    for (int i = 0; i < bcs.ndofOP; ++i) {
-        const int flat_dof = bcs.mdofOP.at(static_cast<std::size_t>(i));
-        x[static_cast<std::size_t>(i)] = coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3];
-    }
-    for (int i = 0; i < bcs.ndofBC; ++i) {
-        const int flat_dof = bcs.mdofBC.at(static_cast<std::size_t>(i));
-        x[static_cast<std::size_t>(bcs.ndofOP + i)] = coords.at(static_cast<std::size_t>(flat_dof / 3))[flat_dof % 3];
-    }
-    return x;
-}
-
 // ─── MPI broadcast of x and gnorm ─────────────────────────────────────────────
 // Mirrors Fortran: MPI_BCAST(IFLAG,GNORM,X) from rank 0 to all.
 void bcast_solver_state(const MpiEnv& mpi,
@@ -728,12 +677,20 @@ MinimizeFreeResult minimize_free(const SimulatorInput& input,
         return {res.total_energy, extract_free_gradient(res, bcs)};
     };
 
-    const bool stop_on_first_trial =
-        (bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31);
+    // In the Fortran executable path, GNORM is still the caller's stale
+    // near-zero value after LBFGS's first reverse-communication trial.  The
+    // minimize_free caller therefore exits on that first trial for the cyclic
+    // cases, which is also the source of the committed post-free fixture.
+    const bool stop_on_first_trial = (bcs.nCodeLoad == 30 || bcs.nCodeLoad == 31);
     int flag = solver.minimize(x_free, xnorm0, stop_on_first_trial, callback);
 
     // Broadcast and scatter final state.
     double gnorm = solver.gnorm();
+    if (stop_on_first_trial && solver.stopped_on_trial_gnorm_gate()) {
+        // The Fortran caller exits on the stale reverse-communication GNORM
+        // argument here. Optim initializes it to zero before pasapas.
+        gnorm = 0.0;
+    }
     bcast_solver_state(mpi, flag, gnorm, x_free);
 
     // Scatter final free DOFs to coords.
@@ -823,6 +780,7 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
         -> std::pair<double, std::vector<double>>
     {
         try {
+            const bool is_first_constrained_eval = !first_eval_dumped;
             // Mirror Fortran long(...): scatter free DOFs and restore BC DOFs
             // from x0_BC before each energy evaluation.
             load_ctrl.scatter_all(xv, state.coords);
@@ -868,6 +826,21 @@ MinimizeResult minimize_constrained(const SimulatorInput& input,
             // Fortran reverse-communication dump, where X is accepted before
             // the G argument is refreshed for that accepted state.
             auto g_free = extract_free_gradient(res, bcs);
+            const char* initial_gradient_path = std::getenv("FCE_TRACE_INITIAL_GFREE");
+            if (is_first_constrained_eval && mpi.is_root() &&
+                initial_gradient_path != nullptr && *initial_gradient_path != '\0') {
+                std::ofstream trace(initial_gradient_path, std::ios::out | std::ios::trunc);
+                if (!trace) {
+                    throw std::runtime_error("cannot open initial free-gradient trace: " +
+                                             std::string(initial_gradient_path));
+                }
+                trace << std::setprecision(17);
+                for (int i = 0; i < bcs.ndofOP; ++i) {
+                    trace << (i + 1) << " "
+                          << bcs.mdofOP.at(static_cast<std::size_t>(i)) + 1 << " "
+                          << g_free.at(static_cast<std::size_t>(i)) << "\n";
+                }
+            }
             if (!have_lagged_trace_gradient) {
                 lagged_trace_gradient = g_free;
                 have_lagged_trace_gradient = true;

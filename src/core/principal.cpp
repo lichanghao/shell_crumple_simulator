@@ -36,7 +36,10 @@ PrincipalResult compute_principal_curvature(const Voigt3& C_elem,
     }
     const double detk0 = curv0_elem[0] * curv0_elem[1] - curv0_elem[2] * curv0_elem[2];
     const double alpha = C_elem[0] * curv0_elem[1] + C_elem[1] * curv0_elem[0] - 2.0 * C_elem[2] * curv0_elem[2];
-    const double xmean = alpha / (2.0 * detC);
+    // Keep the division order used by principal.f90 (alpha/2/detC).
+    // Combining the denominator changes the last bits of the principal
+    // directions and is amplified by the cancellation-sensitive free seed.
+    const double xmean = alpha / 2.0 / detC;
     const double gauss = detk0 / detC;
     const double beta_sq = xmean * xmean - gauss;
     if (!std::isfinite(beta_sq)) {
@@ -117,10 +120,26 @@ PrincipalResult compute_principal_curvature(const Voigt3& C_elem,
         out.dcurvppaldC[ipp] = (-out.curvppal[ipp]) * temp2;
 
         const int jpp = iperm[ipp];
-        out.dvppaldk[ipp][0] =
-            (out.vppal[jpp][0] / (out.curvppal[ipp] - out.curvppal[jpp])) * temp1;
-        out.dvppaldk[ipp][1] =
-            (out.vppal[jpp][1] / (out.curvppal[ipp] - out.curvppal[jpp])) * temp1;
+        // principal.f90 evaluates temp1*vppal/difference left-to-right.  Do
+        // the same componentwise; dividing the scalar first changes the last
+        // bit of the curvature derivatives on the cyclic seed.
+        const double difference = out.curvppal[ipp] - out.curvppal[jpp];
+        const Voigt3 dvdk0{
+            temp1[0] * out.vppal[jpp][0],
+            temp1[1] * out.vppal[jpp][0],
+            temp1[2] * out.vppal[jpp][0],
+        };
+        const Voigt3 dvdk1{
+            temp1[0] * out.vppal[jpp][1],
+            temp1[1] * out.vppal[jpp][1],
+            temp1[2] * out.vppal[jpp][1],
+        };
+        out.dvppaldk[ipp][0] = Voigt3{dvdk0[0] / difference,
+                                      dvdk0[1] / difference,
+                                      dvdk0[2] / difference};
+        out.dvppaldk[ipp][1] = Voigt3{dvdk1[0] / difference,
+                                      dvdk1[1] / difference,
+                                      dvdk1[2] / difference};
 
         out.dvppaldC[ipp][0] =
             (-out.curvppal[ipp]) * out.dvppaldk[ipp][0] - 0.5 * out.vppal[ipp][0] * temp2;

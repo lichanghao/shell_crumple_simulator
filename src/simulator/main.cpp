@@ -1,6 +1,8 @@
 #include "fce/simulator.hpp"
 #include "fce/solver.hpp"
+#include "fce/load_controller.hpp"
 #include "fce/mpi_env.hpp"
+#include "fce/runtime_output.hpp"
 
 #include <filesystem>
 #include <iomanip>
@@ -30,7 +32,8 @@ int main(int argc, char** argv) {
 
         if (argc < 2) {
             if (mpi.is_root()) {
-                std::cerr << "usage: crunch_it <case_dir> [stop_step] [--single-step <step>]\n";
+                std::cerr << "usage: crunch_it <case_dir> [stop_step] [--single-step <step>] "
+                             "[--write-initial-snapshot]\n";
             }
             return 1;
         }
@@ -38,6 +41,7 @@ int main(int argc, char** argv) {
         const std::string case_dir = argv[1];
 
         bool single_step_mode = false;
+        bool write_initial_snapshot = false;
         int step = 1;
         std::optional<int> requested_stop_step;
         for (int i = 2; i < argc; ++i) {
@@ -51,11 +55,22 @@ int main(int argc, char** argv) {
                 ++i;
                 continue;
             }
+            if (arg == "--write-initial-snapshot") {
+                write_initial_snapshot = true;
+                continue;
+            }
 
             if (requested_stop_step.has_value()) {
                 throw std::invalid_argument("unexpected extra argument: " + arg);
             }
             requested_stop_step = std::stoi(arg);
+        }
+
+        if (single_step_mode && write_initial_snapshot) {
+            throw std::invalid_argument("--single-step cannot be combined with --write-initial-snapshot");
+        }
+        if (write_initial_snapshot && requested_stop_step.has_value()) {
+            throw std::invalid_argument("--write-initial-snapshot cannot be combined with stop_step");
         }
 
         const auto input = fce::load_simulator_input(case_dir);
@@ -74,9 +89,30 @@ int main(int argc, char** argv) {
             const auto result = fce::assemble_energy_forces(input, coords, mpi);
 
             if (mpi.is_root()) {
+                std::vector<double> forces_real(
+                    result.force.begin(),
+                    result.force.begin() + 3 * input.mesh.numnods);
+                fce::LoadController load_ctrl(input.bcs);
+                load_ctrl.init(coords);
+                double reaction1 = 0.0;
+                double reaction2 = 0.0;
+                if (input.bcs.nCodeLoad == 222 || input.bcs.nCodeLoad == 1000) {
+                    load_ctrl.compute_reaction(forces_real, coords, reaction1, reaction2);
+                } else {
+                    load_ctrl.compute_reaction(forces_real, reaction1, reaction2);
+                }
+
                 std::cout << "assembled_energy " << std::setprecision(17) << result.total_energy << "\n";
+                std::cout << "reaction1 " << std::setprecision(17) << reaction1 << "\n";
+                std::cout << "reaction2 " << std::setprecision(17) << reaction2 << "\n";
                 std::cout << "inner_fail " << result.inner_fail << "\n";
                 std::cout << "force_dofs " << result.force.size() << "\n";
+            }
+        } else if (write_initial_snapshot) {
+            if (mpi.is_root()) {
+                const auto state = fce::make_runtime_state(input);
+                fce::write_mesh_snapshot(input, state, case_dir, 0);
+                fce::write_mesh_series_index(case_dir, input.bcs, 0);
             }
         } else {
             auto state = fce::make_runtime_state(input);

@@ -96,6 +96,13 @@ struct CreaseData {
     double kappa_cr{0};      // effective curvature threshold (1/nm)
     double alpha_lock{0};    // locking fraction per release phase [0,1]
 
+    // The canonical Fortran crease routine leaves kappa_mag implicit.  Under
+    // its implicit typing rules, the leading 'k' makes that temporary
+    // INTEGER*4, so the archived cyclic case truncates the curvature before
+    // comparing it with kappa_cr.  Keep this source-compatibility detail
+    // explicit instead of hiding it in the floating-point implementation.
+    bool   fortran_integer_kappa_compat{false};
+
     // K0_ref[igauss][k][ielem], k=0..2 (Voigt curvature components)
     // Stored as [ngauss * 3 * numele] flat or indexed as [ielem][igauss][k]
     std::vector<std::vector<std::array<double,3>>> K0_ref; // K0_ref[ielem][igauss][k]

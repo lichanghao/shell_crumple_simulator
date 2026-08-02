@@ -29,6 +29,7 @@ public:
     // Global allreduce sum.
     double allreduce_sum(double local_val) const;
     void   allreduce_sum(std::vector<double>& v) const;
+    void   reduce_sum_to_root(std::vector<double>& v, int root = 0) const;
 
     MPI_Comm comm() const { return MPI_COMM_WORLD; }
 

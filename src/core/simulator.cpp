@@ -19,17 +19,12 @@ namespace fce {
 
 namespace {
 
-constexpr int kDefaultInnerMaxIter = 100;
+constexpr int kDefaultInnerMaxIter = 1000;
 
 EtaField zero_eta_field(const int numele, const int ngauss) {
     return EtaField(static_cast<std::size_t>(numele),
                     std::vector<Vec2>(static_cast<std::size_t>(ngauss), Vec2{0.0, 0.0}));
 }
-
-struct VdwPotential {
-    double energy{0.0};
-    double derivative{0.0};
-};
 
 struct VdwAssembly {
     double total_energy{0.0};
@@ -112,23 +107,6 @@ std::vector<Vec3> locate_vdw_gauss_points(const Mesh& mesh,
     return x;
 }
 
-VdwPotential evaluate_vdw_cut_potential(const VdwData& vdw, const double r) {
-    if (r >= vdw.r_cut) {
-        return {};
-    }
-    const double a1 = vdw.sig / r;
-    const double a6 = std::pow(a1, 6);
-    const double a12 = a6 * a6;
-    const double y06 = std::pow(vdw.y0, 6);
-    VdwPotential out;
-    out.energy = (0.5 * y06 * a12 - a6) * vdw.a / std::pow(vdw.sig, 6);
-    out.derivative =
-        (a1 * 6.0 / vdw.sig * (-y06 * a12 + a6)) * vdw.a / std::pow(vdw.sig, 6);
-    out.energy = out.energy - vdw.Vcut[1] * (r - vdw.r_cut) - vdw.Vcut[0];
-    out.derivative -= vdw.Vcut[1];
-    return out;
-}
-
 int tube_for_gauss_index(const VdwData& vdw, const int gp_index) {
     for (int tube = 0; tube < static_cast<int>(vdw.tub_partitions.size()); ++tube) {
         const auto [begin, end] = vdw.tub_partitions.at(static_cast<std::size_t>(tube));
@@ -155,35 +133,6 @@ bool vdw_prelisted_neighbor_excludes(const VdwData& vdw, const int i, const int 
         }
     }
     return false;
-}
-
-bool vdw_pair_allowed(const Mesh& mesh, const VdwData& vdw, const int i, const int j) {
-    const int ielem = i / vdw.ngauss_vdw;
-    const int jelem = j / vdw.ngauss_vdw;
-    if (vdw.nneigh > 0) {
-        return !vdw_prelisted_neighbor_excludes(vdw, i, j);
-    }
-    if (vdw.nneigh == -2) {
-        if (ielem == jelem) {
-            return false;
-        }
-        const auto& elem = mesh.connect.at(static_cast<std::size_t>(ielem));
-        for (int k = 0; k < 12; ++k) {
-            if (elem.neigh_elem[k] == jelem + 1) {
-                return false;
-            }
-        }
-        return true;
-    }
-    if (vdw.nneigh == -1) {
-        const int my_tube = tube_for_gauss_index(vdw, i);
-        const int other_tube = tube_for_gauss_index(vdw, j);
-        if (my_tube < 0 || other_tube < 0) {
-            throw std::runtime_error("vdW runtime could not map gauss point to tube partition");
-        }
-        return other_tube == my_tube + 1;
-    }
-    return true;
 }
 
 int flatten_vdw_bin_index(const VdwSpatialBins& bins, const int ix, const int iy, const int iz) {
@@ -292,7 +241,7 @@ VdwAssembly assemble_vdw_runtime(const SimulatorInput& input,
                 if (j <= i) {
                     continue;
                 }
-                if (!vdw_pair_allowed(input.mesh, input.vdw, i, j)) {
+                if (!runtime_vdw_pair_allowed(input.mesh, input.vdw, i, j)) {
                     continue;
                 }
                 Vec3 vec{
@@ -322,7 +271,7 @@ VdwAssembly assemble_vdw_runtime(const SimulatorInput& input,
                               (input.general.mat.s0 * input.general.mat.s0 / 4.0);
                 }
 
-                const auto potential = evaluate_vdw_cut_potential(input.vdw, dist);
+                const auto potential = evaluate_runtime_vdw_cut_potential(input.vdw, dist);
                 elem_vdw_energy += potential.energy * weight;
                 const double force_scale =
                     potential.derivative / dist * weight /
@@ -580,11 +529,68 @@ Coords read_vtu_points(const std::string& path, const int expected_points) {
     return coords;
 }
 
-AssemblyResult assemble_energy_forces(const SimulatorInput& input,
-                                      RuntimeState& state,
-                                      const int element_begin,
-                                      const int element_end,
-                                      const int element_stride) {
+RuntimeVdwPotential evaluate_runtime_vdw_cut_potential(const VdwData& vdw, const double r) {
+    if (r >= vdw.r_cut) {
+        return {};
+    }
+    if (r <= std::numeric_limits<double>::epsilon()) {
+        throw std::runtime_error("vdW runtime potential requires positive separation");
+    }
+
+    const double a1 = vdw.sig / r;
+    const double a6 = std::pow(a1, 6);
+    const double a12 = a6 * a6;
+    const double y06 = std::pow(vdw.y0, 6);
+    RuntimeVdwPotential out;
+    out.energy = (0.5 * y06 * a12 - a6) * vdw.a / std::pow(vdw.sig, 6);
+    out.derivative =
+        (a1 * 6.0 / vdw.sig * (-y06 * a12 + a6)) * vdw.a / std::pow(vdw.sig, 6);
+    out.energy = out.energy - vdw.Vcut[1] * (r - vdw.r_cut) - vdw.Vcut[0];
+    out.derivative -= vdw.Vcut[1];
+    return out;
+}
+
+bool runtime_vdw_pair_allowed(const Mesh& mesh, const VdwData& vdw, const int gauss_i, const int gauss_j) {
+    if (vdw.ngauss_vdw <= 0) {
+        throw std::runtime_error("vdW runtime requires positive ngauss_vdw");
+    }
+    const int ielem = gauss_i / vdw.ngauss_vdw;
+    const int jelem = gauss_j / vdw.ngauss_vdw;
+    if (ielem < 0 || ielem >= mesh.numele || jelem < 0 || jelem >= mesh.numele) {
+        throw std::out_of_range("vdW gauss index maps outside the mesh");
+    }
+    if (vdw.nneigh > 0) {
+        return !vdw_prelisted_neighbor_excludes(vdw, gauss_i, gauss_j);
+    }
+    if (vdw.nneigh == -2) {
+        if (ielem == jelem) {
+            return false;
+        }
+        const auto& elem = mesh.connect.at(static_cast<std::size_t>(ielem));
+        for (int k = 0; k < 12; ++k) {
+            if (elem.neigh_elem[k] == jelem + 1) {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (vdw.nneigh == -1) {
+        const int my_tube = tube_for_gauss_index(vdw, gauss_i);
+        const int other_tube = tube_for_gauss_index(vdw, gauss_j);
+        if (my_tube < 0 || other_tube < 0) {
+            throw std::runtime_error("vdW runtime could not map gauss point to tube partition");
+        }
+        return other_tube == my_tube + 1;
+    }
+    return true;
+}
+
+AssemblyResult assemble_energy_forces_local(const SimulatorInput& input,
+                                            RuntimeState& state,
+                                            const int element_begin,
+                                            const int element_end,
+                                            const int element_stride,
+                                            const bool fold_ghost_forces_after_assembly) {
     if (static_cast<int>(state.coords.size()) != input.mesh.numnods) {
         throw std::runtime_error("coordinate field size does not match mesh.numnods");
     }
@@ -608,6 +614,48 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
     const std::unordered_set<int> ghost_elements(input.mesh.elem_ghost.begin(),
                                                  input.mesh.elem_ghost.end());
     std::vector<double> force_accum(result.force.size(), 0.0);
+    const char* extended_force_env = std::getenv("FCE_LONG_DOUBLE_FORCE_ACCUM");
+    const bool extended_force_accumulation =
+        extended_force_env != nullptr && *extended_force_env != '\0' &&
+        std::string(extended_force_env) != "0" &&
+        std::string(extended_force_env) != "false" &&
+        std::string(extended_force_env) != "no" &&
+        std::string(extended_force_env) != "off";
+    std::vector<long double> force_accum_extended;
+    if (extended_force_accumulation) {
+        force_accum_extended.assign(force_accum.size(), 0.0L);
+    }
+    const char* element_force_dump = std::getenv("FCE_TRACE_ELEMENT_FORCE_INITIAL");
+    const char* element_force_call_raw = std::getenv("FCE_TRACE_ELEMENT_FORCE_CALL");
+    static bool element_force_dumped = false;
+    static int element_force_assembly_call = 0;
+    std::ofstream element_force_out;
+    int requested_element_force_call = 0;
+    if (element_force_call_raw != nullptr && *element_force_call_raw != '\0') {
+        char* end = nullptr;
+        const long parsed = std::strtol(element_force_call_raw, &end, 10);
+        if (end != element_force_call_raw && *end == '\0' && parsed >= 0) {
+            requested_element_force_call = static_cast<int>(parsed);
+        }
+    }
+    const int this_element_force_call = element_force_assembly_call++;
+    const bool dump_element_force = element_force_dump != nullptr &&
+                                    *element_force_dump != '\0' &&
+                                    (element_force_call_raw == nullptr ||
+                                     this_element_force_call == requested_element_force_call) &&
+                                    !element_force_dumped;
+    if (dump_element_force) {
+        std::string element_force_path(element_force_dump);
+        if (element_force_call_raw != nullptr) {
+            element_force_path += "." + std::to_string(element_begin);
+        }
+        element_force_out.open(element_force_path, std::ios::out | std::ios::trunc);
+        if (!element_force_out) {
+            throw std::runtime_error("cannot open element-force trace: " +
+                                     element_force_path);
+        }
+        element_force_out << std::uppercase << std::scientific << std::setprecision(17);
+    }
     double total_energy_accum = 0.0;
     double reduced_energy_accum = 0.0;
 
@@ -647,10 +695,23 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
         state.eta.at(static_cast<std::size_t>(ielem)) = elem.eta;
         result.eta_updates.at(static_cast<std::size_t>(ielem)) = elem.eta;
 
-        const double scale = input.ref_config.at(static_cast<std::size_t>(ielem)).J0 / 2.0;
-        total_energy_accum += elem.W_elem * scale;
+        if (dump_element_force) {
+            element_force_out << std::setw(8) << ielem + 1;
+            for (int inode = 0; inode < 12; ++inode) {
+                for (int axis = 0; axis < 3; ++axis) {
+                    element_force_out << " " << elem.f_elem[inode][axis];
+                }
+            }
+            element_force_out << " " << elem.W_elem << '\n';
+        }
+
+        const double J0 = input.ref_config.at(static_cast<std::size_t>(ielem)).J0;
+        // Match energy.f90: accumulate W_dens*J0 over all elements and apply
+        // the factor 1/2 only after the element loop.  The force path is
+        // different in the reference: f_elem is scaled by J0/2 per element.
+        total_energy_accum += elem.W_elem * J0;
         if (ghost_elements.find(ielem) == ghost_elements.end()) {
-            reduced_energy_accum += elem.W_elem * scale;
+            reduced_energy_accum += elem.W_elem * J0;
         }
         result.inner_fail += elem.inner_fail;
 
@@ -659,10 +720,28 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
             const int node_index = connect.neigh_vert[inode];
             const std::size_t base = static_cast<std::size_t>(3 * node_index);
             for (int axis = 0; axis < 3; ++axis) {
-                force_accum[base + static_cast<std::size_t>(axis)] += elem.f_elem[inode][axis] * scale;
+                const std::size_t force_index = base + static_cast<std::size_t>(axis);
+                if (extended_force_accumulation) {
+                    force_accum_extended[force_index] +=
+                        static_cast<long double>(elem.f_elem[inode][axis]) *
+                        static_cast<long double>(J0) / 2.0L;
+                } else {
+                    // energy.f90 scales f_elem before adding it to f_loc.
+                    // Keep the intermediate value explicit so the compiler
+                    // cannot fold the scale into the accumulation operation.
+                    const double scaled_force =
+                        (elem.f_elem[inode][axis] * J0) / 2.0;
+                    force_accum[force_index] += scaled_force;
+                }
             }
         }
     }
+    if (dump_element_force) {
+        element_force_dumped = true;
+    }
+
+    total_energy_accum /= 2.0;
+    reduced_energy_accum /= 2.0;
 
     const auto vdw = assemble_vdw_runtime(input,
                                           coords_with_ghosts,
@@ -672,7 +751,12 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                           ghost_elements);
     total_energy_accum += vdw.total_energy;
     for (std::size_t i = 0; i < force_accum.size(); ++i) {
-        force_accum[i] += vdw.force[i];
+        if (extended_force_accumulation) {
+            force_accum_extended[i] += static_cast<long double>(vdw.force[i]);
+            force_accum[i] = static_cast<double>(force_accum_extended[i]);
+        } else {
+            force_accum[i] += vdw.force[i];
+        }
     }
 
     result.total_energy = total_energy_accum;
@@ -682,9 +766,24 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
         result.force[i] = force_accum[i];
     }
 
-    fold_ghost_forces(result.force, input.mesh);
+    if (fold_ghost_forces_after_assembly) {
+        fold_ghost_forces(result.force, input.mesh);
+    }
 
     return result;
+}
+
+AssemblyResult assemble_energy_forces(const SimulatorInput& input,
+                                      RuntimeState& state,
+                                      const int element_begin,
+                                      const int element_end,
+                                      const int element_stride) {
+    return assemble_energy_forces_local(input,
+                                         state,
+                                         element_begin,
+                                         element_end,
+                                         element_stride,
+                                         /*fold_ghost_forces_after_assembly=*/true);
 }
 
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
@@ -700,16 +799,23 @@ AssemblyResult assemble_energy_forces(const SimulatorInput& input,
 AssemblyResult assemble_energy_forces(const SimulatorInput& input,
                                       RuntimeState& state,
                                       const MpiEnv& mpi) {
-    auto local = assemble_energy_forces(input,
-                                        state,
-                                        mpi.rank(),
-                                        input.mesh.numele,
-                                        mpi.size());
+    // Match energy.f90: reduce raw f_loc first, then fold ghost forces on
+    // rank 0, and finally broadcast the real-node force vector.
+    auto local = assemble_energy_forces_local(input,
+                                              state,
+                                              mpi.rank(),
+                                              input.mesh.numele,
+                                              mpi.size(),
+                                              /*fold_ghost_forces_after_assembly=*/false);
 
     local.total_energy = mpi.allreduce_sum(local.total_energy);
     local.reduced_energy = mpi.allreduce_sum(local.reduced_energy);
     local.vdw_reduced_energy = mpi.allreduce_sum(local.vdw_reduced_energy);
-    mpi.allreduce_sum(local.force);
+    mpi.reduce_sum_to_root(local.force);
+    if (mpi.is_root()) {
+        fold_ghost_forces(local.force, input.mesh);
+    }
+    mpi.bcast_doubles(local.force, 0);
 
     std::vector<double> fail_count{static_cast<double>(local.inner_fail)};
     mpi.allreduce_sum(fail_count);

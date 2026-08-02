@@ -126,6 +126,7 @@ private:
     bool   finish_{false};
     double stp_{1.0};
     double stp1_{1.0};
+    double ddx_{0.0};
 
     // ── MCSRCH persistent state ───────────────────────────────────────────────
     bool   mcsrch_initialized_{false};

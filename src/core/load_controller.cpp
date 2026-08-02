@@ -73,13 +73,15 @@ void LoadController::apply_increment(int iload, Coords& coords) {
         const double dl = compression_phase
             ? (bcs_.value_comp / static_cast<double>(bcs_.nloadstep_comp))
             : (bcs_.value_rel / static_cast<double>(bcs_.nloadstep_rel));
-        const double sign = compression_phase ? -1.0 : 1.0;
-
         for (int inod = 0; inod < bcs_.nnodBC; ++inod) {
             const int side_tag = bcs_.mnodBC.at(static_cast<std::size_t>(inod))[1];
             if (ncode == 30) {
                 if (side_tag == 1) {
-                    x0_bc_.at(static_cast<std::size_t>(3 * inod)) += sign * dl;
+                    if (compression_phase) {
+                        x0_bc_.at(static_cast<std::size_t>(3 * inod)) -= dl;
+                    } else {
+                        x0_bc_.at(static_cast<std::size_t>(3 * inod)) += dl;
+                    }
                 }
                 continue;
             }
@@ -89,12 +91,21 @@ void LoadController::apply_increment(int iload, Coords& coords) {
             }
             if (side_tag == 1 || side_tag == 2) {
                 const int axis = side_tag - 1;
-                x0_bc_.at(static_cast<std::size_t>(3 * inod + axis)) += sign * dl;
+                if (compression_phase) {
+                    x0_bc_.at(static_cast<std::size_t>(3 * inod + axis)) -= dl;
+                } else {
+                    x0_bc_.at(static_cast<std::size_t>(3 * inod + axis)) += dl;
+                }
                 continue;
             }
             if (side_tag == 3) {
-                x0_bc_.at(static_cast<std::size_t>(3 * inod)) += sign * dl;
-                x0_bc_.at(static_cast<std::size_t>(3 * inod + 1)) += sign * dl;
+                if (compression_phase) {
+                    x0_bc_.at(static_cast<std::size_t>(3 * inod)) -= dl;
+                    x0_bc_.at(static_cast<std::size_t>(3 * inod + 1)) -= dl;
+                } else {
+                    x0_bc_.at(static_cast<std::size_t>(3 * inod)) += dl;
+                    x0_bc_.at(static_cast<std::size_t>(3 * inod + 1)) += dl;
+                }
             }
         }
 
